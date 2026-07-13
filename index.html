@@ -25,6 +25,16 @@
     margin: 8px 0 4px;
     text-align: center;
   }
+  #scoresLink {
+    background: none;
+    border: none;
+    color: #8fb3ff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: underline;
+    margin-bottom: 14px;
+    padding: 4px;
+  }
   #score {
     font-size: clamp(1.1rem, 5vw, 1.6rem);
     font-weight: 600;
@@ -163,11 +173,71 @@
   #shareBtn:active {
     background: #3a4456;
   }
+
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 10;
+  }
+  .overlay.open {
+    display: flex;
+  }
+  .overlay-panel {
+    background: #1b212b;
+    border-radius: 16px;
+    padding: 20px;
+    width: 100%;
+    max-width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .overlay-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .overlay-header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+  }
+  #closeHistoryBtn {
+    background: none;
+    border: none;
+    color: #f0f2f5;
+    font-size: 1.4rem;
+    padding: 0 4px;
+  }
+  #historyList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .history-row {
+    display: flex;
+    justify-content: space-between;
+    background: #232a35;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+  }
+  .history-empty {
+    text-align: center;
+    color: #8a94a6;
+    padding: 20px 0;
+  }
 </style>
 </head>
 <body>
 
 <h1>🎯 Ring the Bull</h1>
+<button id="scoresLink">📋 Scores</button>
 <div id="score"></div>
 <div id="finalScore">
   <div id="finalScoreNumber"></div>
@@ -188,9 +258,21 @@
   <button id="newGameBtn" class="small-btn">New Game</button>
 </div>
 
+<div id="historyOverlay" class="overlay">
+  <div class="overlay-panel">
+    <div class="overlay-header">
+      <h2>Score History</h2>
+      <button id="closeHistoryBtn">✕</button>
+    </div>
+    <div id="historyList"></div>
+    <button id="clearHistoryBtn" class="small-btn">Clear History</button>
+  </div>
+</div>
+
 <script>
   const TOTAL_SHOTS = 21;
   const STORAGE_KEY = 'ringthebull-state';
+  const HISTORY_KEY = 'ringthebull-history';
 
   const gridEl = document.getElementById('grid');
   const scoreEl = document.getElementById('score');
@@ -203,8 +285,14 @@
   const shareBtn = document.getElementById('shareBtn');
   const undoBtn = document.getElementById('undoBtn');
   const newGameBtn = document.getElementById('newGameBtn');
+  const scoresLink = document.getElementById('scoresLink');
+  const historyOverlay = document.getElementById('historyOverlay');
+  const historyListEl = document.getElementById('historyList');
+  const closeHistoryBtn = document.getElementById('closeHistoryBtn');
+  const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
   let shots = loadState();
+  let history = loadHistory();
 
   function loadState() {
     try {
@@ -220,10 +308,28 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ shots }));
   }
 
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {}
+    return [];
+  }
+
+  function saveHistory() {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  }
+
   function recordShot(result) {
     if (shots.length >= TOTAL_SHOTS) return;
     shots.push(result);
     saveState();
+    if (shots.length === TOTAL_SHOTS) {
+      const hits = shots.filter(s => s === 'hit').length;
+      history.unshift({ date: new Date().toISOString(), hits, total: TOTAL_SHOTS });
+      saveHistory();
+    }
     render();
   }
 
@@ -264,6 +370,33 @@
   function flashShareBtn(message) {
     shareBtn.textContent = message;
     setTimeout(() => { shareBtn.textContent = 'Share Score'; }, 1500);
+  }
+
+  function renderHistory() {
+    if (history.length === 0) {
+      historyListEl.innerHTML = '<div class="history-empty">No games played yet.</div>';
+      return;
+    }
+    historyListEl.innerHTML = history.map(entry => {
+      const dateStr = new Date(entry.date).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      return `<div class="history-row"><span>${dateStr}</span><span>${entry.hits}/${entry.total}</span></div>`;
+    }).join('');
+  }
+
+  function openHistory() {
+    renderHistory();
+    historyOverlay.classList.add('open');
+  }
+
+  function closeHistory() {
+    historyOverlay.classList.remove('open');
+  }
+
+  function clearHistory() {
+    if (!confirm('Clear all saved score history?')) return;
+    history = [];
+    saveHistory();
+    renderHistory();
   }
 
   function newGame() {
@@ -316,6 +449,9 @@
   newGameBtn.addEventListener('click', newGame);
   nextGameBtn.addEventListener('click', newGame);
   shareBtn.addEventListener('click', shareScore);
+  scoresLink.addEventListener('click', openHistory);
+  closeHistoryBtn.addEventListener('click', closeHistory);
+  clearHistoryBtn.addEventListener('click', clearHistory);
 
   render();
 </script>
