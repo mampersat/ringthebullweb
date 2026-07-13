@@ -6,6 +6,8 @@ A simple, phone-friendly web app for keeping score while playing **Ring the Bull
 
 **Live app:** https://mampersat.com/ringthebull/
 
+![App screenshot](images/screenshot.png)
+
 ## What is Ring the Bull?
 
 Ring the Bull is a traditional pub game: players swing a ring on a rope, trying to hook it onto a bull's horn mounted on the wall. See the [Pineapple Inn, Shaw, Greater Manchester rules](https://www.mastersofgames.com/rules/ringing-bull-rules.htm) for the full traditional rules.
@@ -28,7 +30,7 @@ Just open `index.html` in a browser — no build step, no dependencies.
 
 ## Deploying
 
-`./deploy.sh` uploads `index.html` to S3 (`s3://mampersat.com/ringthebull/`).
+`./deploy.sh` syncs the app to S3 (`s3://mampersat.com/ringthebull/`), invalidates the CloudFront cache, and regenerates the README screenshot above.
 
 ## Related
 

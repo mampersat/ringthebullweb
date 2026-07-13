@@ -21,3 +21,11 @@ aws cloudfront create-invalidation \
   --paths "/ringthebull/*" >/dev/null
 
 echo "Invalidated CloudFront cache for /ringthebull/*"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+(
+  cd "$SCRIPT_DIR/scripts"
+  [ -d node_modules ] || npm install --no-audit --no-fund >/dev/null
+  node screenshot.js
+)
+echo "Regenerated images/screenshot.png for the README"
