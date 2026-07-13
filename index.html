@@ -351,10 +351,18 @@
     render();
   }
 
+  function buildShareGrid() {
+    const blocks = shots.map(s => s === 'hit' ? '🟩' : '🟥');
+    const rows = [];
+    for (let i = 0; i < blocks.length; i += 7) {
+      rows.push(blocks.slice(i, i + 7).join(''));
+    }
+    return rows.join('\n');
+  }
+
   async function shareScore() {
     const hits = shots.filter(s => s === 'hit').length;
-    const misses = shots.length - hits;
-    const text = `🐂 Ring the Bull — I scored ${hits}/${TOTAL_SHOTS} (${hits} hits, ${misses} misses)!`;
+    const text = `🐂 Ring the Bull ${hits}/${TOTAL_SHOTS}\n\n${buildShareGrid()}`;
 
     if (navigator.share) {
       try {
