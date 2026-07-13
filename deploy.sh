@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploys index.html to the Ring the Bull page on mampersat.com.
+# Deploys the Ring the Bull site (app shell + PWA assets) to mampersat.com.
 S3_PATH="s3://mampersat.com/ringthebull/"
 
-aws s3 cp index.html "$S3_PATH" \
+aws s3 sync . "$S3_PATH" \
   --acl public-read \
-  --content-type "text/html" \
+  --exclude "*" \
+  --include "index.html" \
+  --include "manifest.json" \
+  --include "sw.js" \
+  --include "icons/*" \
   --cache-control "no-cache"
 
 echo "Deployed to https://mampersat.com/ringthebull/index.html"
