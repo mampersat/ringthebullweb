@@ -243,6 +243,17 @@
     color: #8a94a6;
     padding: 20px 0;
   }
+
+  #footer {
+    margin-top: 24px;
+    padding-bottom: 8px;
+    font-size: 0.8rem;
+    color: #5b6472;
+    text-align: center;
+  }
+  #footer a {
+    color: #5b6472;
+  }
 </style>
 </head>
 <body>
@@ -279,6 +290,11 @@
     <button id="clearHistoryBtn" class="small-btn">Clear History</button>
   </div>
 </div>
+
+<footer id="footer">
+  <a href="https://github.com/mampersat/ringthebullweb" target="_blank" rel="noopener noreferrer">GitHub</a>
+  · build <span id="buildHash">local-dev</span>
+</footer>
 
 <script>
   const TOTAL_SHOTS = 21;
