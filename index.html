@@ -380,7 +380,7 @@
 
   async function shareScore() {
     const hits = shots.filter(s => s === 'hit').length;
-    const text = `🐂 Ring the Bull ${hits}/${TOTAL_SHOTS}\n\n${buildShareGrid()}\n\n${APP_URL}`;
+    const text = `I Rung the Bull ${hits}/${TOTAL_SHOTS} times\n\n${buildShareGrid()}\n\n${APP_URL}`;
 
     if (navigator.share) {
       try {
