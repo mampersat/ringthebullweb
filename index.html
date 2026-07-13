@@ -236,7 +236,7 @@
 </head>
 <body>
 
-<h1>🎯 Ring the Bull</h1>
+<h1>🐂 Ring the Bull</h1>
 <button id="scoresLink">📋 Scores</button>
 <div id="score"></div>
 <div id="finalScore">
@@ -343,7 +343,7 @@
   async function shareScore() {
     const hits = shots.filter(s => s === 'hit').length;
     const misses = shots.length - hits;
-    const text = `🎯 Ring the Bull — I scored ${hits}/${TOTAL_SHOTS} (${hits} hits, ${misses} misses)!`;
+    const text = `🐂 Ring the Bull — I scored ${hits}/${TOTAL_SHOTS} (${hits} hits, ${misses} misses)!`;
 
     if (navigator.share) {
       try {
