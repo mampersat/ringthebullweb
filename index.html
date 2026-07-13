@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Ring the Bull</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #14181f;
+    color: #f0f2f5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  h1 {
+    font-size: clamp(1.5rem, 6vw, 2.25rem);
+    margin: 8px 0 4px;
+    text-align: center;
+  }
+  #score {
+    font-size: clamp(1.1rem, 5vw, 1.6rem);
+    font-weight: 600;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  #score .hits { color: #3ddc84; }
+  #score .misses { color: #ff5c5c; }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: 560px;
+    margin-bottom: 20px;
+  }
+  .slot {
+    aspect-ratio: 1;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: clamp(0.9rem, 3.5vw, 1.2rem);
+    background: #232a35;
+    border: 2px solid #333c4a;
+    color: #6b7686;
+  }
+  .slot.hit {
+    background: #1e5c3a;
+    border-color: #3ddc84;
+    color: #3ddc84;
+  }
+  .slot.miss {
+    background: #5c1e1e;
+    border-color: #ff5c5c;
+    color: #ff5c5c;
+  }
+  .slot.next {
+    border-color: #f0f2f5;
+    box-shadow: 0 0 0 2px rgba(240,242,245,0.4);
+  }
+
+  #actions {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 560px;
+    margin-bottom: 14px;
+  }
+  button {
+    font-family: inherit;
+    border: none;
+    cursor: pointer;
+  }
+  .big-btn {
+    flex: 1;
+    height: 25vh;
+    min-height: 140px;
+    max-height: 260px;
+    font-size: clamp(1.5rem, 8vw, 2.5rem);
+    font-weight: 800;
+    border-radius: 16px;
+    color: #fff;
+    letter-spacing: 0.05em;
+    transition: transform 0.05s ease;
+  }
+  .big-btn:active {
+    transform: scale(0.96);
+  }
+  .big-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+  #hitBtn { background: #1f9d55; }
+  #missBtn { background: #d13b3b; }
+
+  #secondaryActions {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 560px;
+  }
+  .small-btn {
+    flex: 1;
+    height: 52px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 10px;
+    background: #2b3342;
+    color: #f0f2f5;
+  }
+  .small-btn:active {
+    background: #3a4456;
+  }
+  .small-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  #finalScore {
+    display: none;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  #finalScoreNumber {
+    font-size: clamp(3.5rem, 20vw, 7rem);
+    font-weight: 900;
+    line-height: 1;
+    color: #3ddc84;
+  }
+  #finalScoreDetail {
+    font-size: clamp(1rem, 4vw, 1.3rem);
+    font-weight: 600;
+    color: #c7ccd6;
+    margin-top: 4px;
+  }
+  #nextGameBtn {
+    display: none;
+    width: 100%;
+    background: #2f6fed;
+  }
+  #shareBtn {
+    display: none;
+    margin: 14px auto 0;
+    width: 200px;
+    height: 48px;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 10px;
+    background: #2b3342;
+    color: #f0f2f5;
+  }
+  #shareBtn:active {
+    background: #3a4456;
+  }
+</style>
+</head>
+<body>
+
+<h1>🎯 Ring the Bull</h1>
+<div id="score"></div>
+<div id="finalScore">
+  <div id="finalScoreNumber"></div>
+  <div id="finalScoreDetail"></div>
+  <button id="shareBtn">Share Score</button>
+</div>
+
+<div id="grid"></div>
+
+<div id="actions">
+  <button id="hitBtn" class="big-btn">HIT</button>
+  <button id="missBtn" class="big-btn">MISS</button>
+  <button id="nextGameBtn" class="big-btn">NEXT GAME</button>
+</div>
+
+<div id="secondaryActions">
+  <button id="undoBtn" class="small-btn">Undo</button>
+  <button id="newGameBtn" class="small-btn">New Game</button>
+</div>
+
+<script>
+  const TOTAL_SHOTS = 21;
+  const STORAGE_KEY = 'ringthebull-state';
+
+  const gridEl = document.getElementById('grid');
+  const scoreEl = document.getElementById('score');
+  const finalScoreEl = document.getElementById('finalScore');
+  const finalScoreNumberEl = document.getElementById('finalScoreNumber');
+  const finalScoreDetailEl = document.getElementById('finalScoreDetail');
+  const hitBtn = document.getElementById('hitBtn');
+  const missBtn = document.getElementById('missBtn');
+  const nextGameBtn = document.getElementById('nextGameBtn');
+  const shareBtn = document.getElementById('shareBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const newGameBtn = document.getElementById('newGameBtn');
+
+  let shots = loadState();
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.shots)) return parsed.shots;
+    } catch (e) {}
+    return [];
+  }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ shots }));
+  }
+
+  function recordShot(result) {
+    if (shots.length >= TOTAL_SHOTS) return;
+    shots.push(result);
+    saveState();
+    render();
+  }
+
+  function undo() {
+    if (shots.length === 0) return;
+    shots.pop();
+    saveState();
+    render();
+  }
+
+  async function shareScore() {
+    const hits = shots.filter(s => s === 'hit').length;
+    const misses = shots.length - hits;
+    const text = `🎯 Ring the Bull — I scored ${hits}/${TOTAL_SHOTS} (${hits} hits, ${misses} misses)!`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Ring the Bull', text });
+      } catch (e) {
+        // user cancelled the native share sheet
+      }
+      return;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        flashShareBtn('Copied!');
+        return;
+      } catch (e) {}
+    }
+
+    // Clipboard API needs a secure (https) context and can be denied by the
+    // browser; prompt() always works so there's still a way to copy the score.
+    prompt('Copy your score:', text);
+  }
+
+  function flashShareBtn(message) {
+    shareBtn.textContent = message;
+    setTimeout(() => { shareBtn.textContent = 'Share Score'; }, 1500);
+  }
+
+  function newGame() {
+    const gameOver = shots.length >= TOTAL_SHOTS;
+    if (!gameOver && shots.length > 0 && !confirm('Start a new game? This will clear the current scorecard.')) {
+      return;
+    }
+    shots = [];
+    saveState();
+    render();
+  }
+
+  function render() {
+    gridEl.innerHTML = '';
+    for (let i = 0; i < TOTAL_SHOTS; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      if (i < shots.length) {
+        slot.classList.add(shots[i]);
+        slot.textContent = shots[i] === 'hit' ? '●' : '✕';
+      } else {
+        if (i === shots.length) slot.classList.add('next');
+        slot.textContent = i + 1;
+      }
+      gridEl.appendChild(slot);
+    }
+
+    const hits = shots.filter(s => s === 'hit').length;
+    const misses = shots.length - hits;
+    const gameOver = shots.length >= TOTAL_SHOTS;
+
+    scoreEl.style.display = gameOver ? 'none' : 'block';
+    scoreEl.innerHTML =
+      `<span class="hits">${hits} hits</span> &nbsp;/&nbsp; <span class="misses">${misses} misses</span> &nbsp;/&nbsp; ${shots.length}/${TOTAL_SHOTS} shots`;
+
+    finalScoreEl.style.display = gameOver ? 'block' : 'none';
+    finalScoreNumberEl.textContent = `${hits} / ${TOTAL_SHOTS}`;
+    finalScoreDetailEl.textContent = `${hits} hits · ${misses} misses`;
+
+    hitBtn.style.display = gameOver ? 'none' : '';
+    missBtn.style.display = gameOver ? 'none' : '';
+    nextGameBtn.style.display = gameOver ? 'block' : 'none';
+    shareBtn.style.display = gameOver ? 'block' : 'none';
+    undoBtn.disabled = shots.length === 0;
+  }
+
+  hitBtn.addEventListener('click', () => recordShot('hit'));
+  missBtn.addEventListener('click', () => recordShot('miss'));
+  undoBtn.addEventListener('click', undo);
+  newGameBtn.addEventListener('click', newGame);
+  nextGameBtn.addEventListener('click', newGame);
+  shareBtn.addEventListener('click', shareScore);
+
+  render();
+</script>
+
+</body>
+</html>
