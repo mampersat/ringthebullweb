@@ -243,6 +243,49 @@
     color: #8a94a6;
     padding: 20px 0;
   }
+  .history-actions {
+    display: flex;
+    gap: 12px;
+  }
+
+  .sync-hint {
+    color: #c7ccd6;
+    font-size: 0.9rem;
+    text-align: center;
+    margin: 0 0 14px;
+  }
+  #syncMenu, #syncShow, #syncScan {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .qr-container {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 4px;
+  }
+  .qr-container svg {
+    width: 100%;
+    height: auto;
+    max-width: 320px;
+  }
+  .scan-video-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+  }
+  #scanVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
 
   #footer {
     margin-top: 24px;
@@ -287,7 +330,40 @@
       <button id="closeHistoryBtn">✕</button>
     </div>
     <div id="historyList"></div>
-    <button id="clearHistoryBtn" class="small-btn">Clear History</button>
+    <div class="history-actions">
+      <button id="syncBtn" class="small-btn">Sync with Device</button>
+      <button id="clearHistoryBtn" class="small-btn">Clear History</button>
+    </div>
+  </div>
+</div>
+
+<div id="syncOverlay" class="overlay">
+  <div class="overlay-panel">
+    <div class="overlay-header">
+      <h2>Sync Scores</h2>
+      <button id="closeSyncBtn">✕</button>
+    </div>
+
+    <div id="syncMenu">
+      <p class="sync-hint">Combine score history with another device. Works offline — just scan each other's code.</p>
+      <button id="showCodeBtn" class="small-btn">Show My Code</button>
+      <button id="scanCodeBtn" class="small-btn">Scan a Code</button>
+    </div>
+
+    <div id="syncShow" style="display:none">
+      <p class="sync-hint">Have the other device scan this code.</p>
+      <div id="qrContainer" class="qr-container"></div>
+      <button id="syncShowBackBtn" class="small-btn">Back</button>
+    </div>
+
+    <div id="syncScan" style="display:none">
+      <p class="sync-hint">Point your camera at the other device's code.</p>
+      <div class="scan-video-wrap">
+        <video id="scanVideo" playsinline muted></video>
+      </div>
+      <p id="scanStatus" class="sync-hint"></p>
+      <button id="syncScanBackBtn" class="small-btn">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -296,8 +372,12 @@
   · build <span id="buildHash">local-dev</span>
 </footer>
 
+<script src="vendor/qrcode-generator.min.js"></script>
+<script src="vendor/jsQR.min.js"></script>
 <script>
   const TOTAL_SHOTS = 21;
+  const SYNC_PREFIX = 'RTB1:';
+  const MAX_SYNC_ENTRIES = 40;
   const STORAGE_KEY = 'ringthebull-state';
   const HISTORY_KEY = 'ringthebull-history';
 
@@ -317,6 +397,20 @@
   const historyListEl = document.getElementById('historyList');
   const closeHistoryBtn = document.getElementById('closeHistoryBtn');
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+
+  const syncBtn = document.getElementById('syncBtn');
+  const syncOverlay = document.getElementById('syncOverlay');
+  const closeSyncBtn = document.getElementById('closeSyncBtn');
+  const syncMenu = document.getElementById('syncMenu');
+  const syncShow = document.getElementById('syncShow');
+  const syncScan = document.getElementById('syncScan');
+  const showCodeBtn = document.getElementById('showCodeBtn');
+  const scanCodeBtn = document.getElementById('scanCodeBtn');
+  const syncShowBackBtn = document.getElementById('syncShowBackBtn');
+  const syncScanBackBtn = document.getElementById('syncScanBackBtn');
+  const qrContainer = document.getElementById('qrContainer');
+  const scanVideo = document.getElementById('scanVideo');
+  const scanStatus = document.getElementById('scanStatus');
 
   let shots = loadState();
   let history = loadHistory();
@@ -436,6 +530,138 @@
     renderHistory();
   }
 
+  function encodeHistoryForSync() {
+    const entries = history.slice(0, MAX_SYNC_ENTRIES)
+      .map(h => [Math.round(new Date(h.date).getTime() / 1000), h.hits, h.total]);
+    return SYNC_PREFIX + JSON.stringify(entries);
+  }
+
+  function mergeSyncPayload(text) {
+    if (typeof text !== 'string' || !text.startsWith(SYNC_PREFIX)) return null;
+    let tuples;
+    try {
+      tuples = JSON.parse(text.slice(SYNC_PREFIX.length));
+    } catch (e) { return null; }
+    if (!Array.isArray(tuples)) return null;
+
+    const existingDates = new Set(history.map(h => h.date));
+    let added = 0;
+    for (const t of tuples) {
+      if (!Array.isArray(t) || t.length < 3) continue;
+      const [epoch, hits, total] = t;
+      if (!Number.isFinite(epoch) || !Number.isFinite(hits) || !Number.isFinite(total)) continue;
+      const date = new Date(epoch * 1000).toISOString();
+      if (existingDates.has(date)) continue;
+      history.push({ date, hits, total });
+      existingDates.add(date);
+      added++;
+    }
+    if (added > 0) {
+      history.sort((a, b) => new Date(b.date) - new Date(a.date));
+      saveHistory();
+    }
+    return added;
+  }
+
+  function showSyncView(name) {
+    if (name !== 'scan') stopScan();
+    syncMenu.style.display = name === 'menu' ? 'flex' : 'none';
+    syncShow.style.display = name === 'show' ? 'flex' : 'none';
+    syncScan.style.display = name === 'scan' ? 'flex' : 'none';
+  }
+
+  function openSync() {
+    syncOverlay.classList.add('open');
+    showSyncView('menu');
+  }
+
+  function closeSync() {
+    stopScan();
+    syncOverlay.classList.remove('open');
+  }
+
+  function showMyCode() {
+    showSyncView('show');
+    if (history.length === 0) {
+      qrContainer.innerHTML = '<p class="sync-hint" style="color:#5b6472;margin:0;">No scores to share yet.</p>';
+      return;
+    }
+    try {
+      const qr = qrcode(0, 'L');
+      qr.addData(encodeHistoryForSync());
+      qr.make();
+      qrContainer.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 4 });
+    } catch (e) {
+      qrContainer.innerHTML = '<p class="sync-hint" style="color:#5b6472;margin:0;">Too much history to fit in one code.</p>';
+    }
+  }
+
+  let scanStream = null;
+  let scanRAF = null;
+
+  async function startScan() {
+    showSyncView('scan');
+    scanStatus.textContent = 'Requesting camera…';
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch (e) {
+      scanStatus.textContent = 'Camera access denied or unavailable.';
+      return;
+    }
+    scanVideo.srcObject = scanStream;
+    try {
+      await scanVideo.play();
+    } catch (e) {}
+    scanStatus.textContent = 'Scanning…';
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    const tick = () => {
+      if (!scanStream) return;
+      if (scanVideo.readyState === scanVideo.HAVE_ENOUGH_DATA && scanVideo.videoWidth) {
+        canvas.width = scanVideo.videoWidth;
+        canvas.height = scanVideo.videoHeight;
+        ctx.drawImage(scanVideo, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const result = jsQR(imageData.data, imageData.width, imageData.height);
+        if (result && result.data) {
+          onScanSuccess(result.data);
+          return;
+        }
+      }
+      scanRAF = requestAnimationFrame(tick);
+    };
+    scanRAF = requestAnimationFrame(tick);
+  }
+
+  function stopScan() {
+    if (scanRAF) {
+      cancelAnimationFrame(scanRAF);
+      scanRAF = null;
+    }
+    if (scanStream) {
+      scanStream.getTracks().forEach(t => t.stop());
+      scanStream = null;
+    }
+    scanVideo.srcObject = null;
+  }
+
+  function onScanSuccess(text) {
+    stopScan();
+    const added = mergeSyncPayload(text);
+    if (added === null) {
+      scanStatus.textContent = "That code isn't a Ring the Bull sync code.";
+      setTimeout(() => { if (syncScan.style.display !== 'none') startScan(); }, 1500);
+      return;
+    }
+    scanStatus.textContent = added > 0
+      ? `Synced ${added} new game${added === 1 ? '' : 's'}!`
+      : 'Already up to date.';
+    renderHistory();
+    setTimeout(closeSync, 1500);
+  }
+
   function newGame() {
     const gameOver = shots.length >= TOTAL_SHOTS;
     if (!gameOver && shots.length > 0 && !confirm('Start a new game? This will clear the current scorecard.')) {
@@ -489,6 +715,12 @@
   scoresLink.addEventListener('click', openHistory);
   closeHistoryBtn.addEventListener('click', closeHistory);
   clearHistoryBtn.addEventListener('click', clearHistory);
+  syncBtn.addEventListener('click', openSync);
+  closeSyncBtn.addEventListener('click', closeSync);
+  showCodeBtn.addEventListener('click', showMyCode);
+  scanCodeBtn.addEventListener('click', startScan);
+  syncShowBackBtn.addEventListener('click', () => showSyncView('menu'));
+  syncScanBackBtn.addEventListener('click', () => showSyncView('menu'));
 
   render();
 

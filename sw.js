@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ringthebull-v1';
+const CACHE_NAME = 'ringthebull-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,8 @@ const ASSETS = [
   './icons/apple-touch-icon.png',
   './icons/favicon-32.png',
   './icons/favicon-16.png',
+  './vendor/qrcode-generator.min.js',
+  './vendor/jsQR.min.js',
 ];
 
 self.addEventListener('install', event => {

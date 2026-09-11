@@ -22,6 +22,7 @@ aws s3 sync . "$S3_PATH" \
   --include "manifest.json" \
   --include "sw.js" \
   --include "icons/*" \
+  --include "vendor/*" \
   --cache-control "no-cache"
 
 echo "Deployed to https://mampersat.com/ringthebull/index.html (build $BUILD_HASH)"
