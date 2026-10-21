@@ -78,10 +78,10 @@ A person holding the metal ring adds capacitance, so the charge time gets longer
 
 | Condition | Typical reading |
 |---|---|
-| Ring untouched | 50–59 µs |
-| Ring held | 90–100 µs |
+| Ring untouched | 52–117 µs (typically ~55–95) |
+| Ring held | ~1,100–6,000 µs (mostly ~4,700) |
 
-The firmware treats ≥ 80 µs as a grab and ≤ 70 µs as a release. The gap is hysteresis to stop flicker. These numbers are a relative timing, not capacitance in farads, and came from the original prototype wiring.
+The firmware treats ≥ 500 µs as a grab and ≤ 300 µs as a release. The gap is hysteresis to stop flicker. These numbers are a relative timing, not capacitance in farads, and were logged on the installed ring and wiring with `diag_capacitance.py`.
 
 ### Hook: continuity
 
@@ -110,28 +110,28 @@ Over USB serial the Pico draws an in-place text dashboard (~5 Hz): game state or
 
 ## How to play
 
-1. Grab the ring. **Pixel 0** blinks red.
-2. Swing and let go. Pixel 0 turns solid **blue** while the ring is in flight.
-3. If the ring lands on the hook: **green**, and the onboard LED lights.
-4. If it misses and you catch it again, the throw is scored as a miss and you're straight back to holding it.
+1. The next free pixel glows **purple**, brighter the more the ring is being touched (live capacitance, log scale).
+2. Swing and let go. That pixel turns **blue** while the ring is in flight.
+3. If the ring lands on the hook it locks **green**; if you catch it again it locks **red** (a miss). While the ring is still on the hook, the next pixel **blinks white** until you grab it again, then it goes back to purple.
 
-Pixel 0 shows the current state; pixels 1, 2, 3 … show throw 1, 2, 3 …
+Pixel 1 is throw 1, pixel 2 is throw 2, and so on.
 
 | Colour | Meaning |
 |---|---|
-| Blinking red | Ring grabbed |
+| Purple (brightness varies) | Live capacitance at the next throw's location |
 | Solid blue | Ring in flight |
+| Blinking white | Ring still on the hook; grab it to continue |
 | Green | Hit |
 | Red | Miss |
-| Off | Idle / unused |
+| Off | Unused |
 
-Finished throws keep their red or green until reset. History wraps around once the strip is full.
+Finished throws keep their red or green until reset. History wraps around after 22 throws.
 
 If the ring is thrown and nothing happens for 3 seconds, a miss is recorded and the onboard LED flashes briefly.
 
 ## Resetting the game
 
-Touch the ring to the hook **three separate times within two seconds** (each contact ≥ 50 ms with ≥ 50 ms between them). Works while holding the ring but not during a throw. Counts and history clear, the strip flashes white three times, and the system waits for you to let go of the ring before a new game starts.
+Touch the ring to the hook **three separate times within two seconds** (each contact ≥ 150 ms with ≥ 150 ms between them, so a bouncing ring doesn't trigger it). Works while holding the ring but not during a throw. Counts and history clear, the strip flashes white three times, and the system waits for you to let go of the ring before a new game starts.
 
 ## Attract mode
 
@@ -143,7 +143,7 @@ Everything is a constant near the top of `main.py`:
 
 | Constant | Default | Meaning |
 |---|---|---|
-| `GRAB_THRESHOLD` / `RELEASE_THRESHOLD` | 80 / 70 | Cap-sense µs thresholds |
+| `GRAB_THRESHOLD` / `RELEASE_THRESHOLD` | 500 / 300 | Cap-sense µs thresholds |
 | `PIXEL_COUNT` | 100 | Strip length in firmware |
 | `BRIGHTNESS` | 0.15 | Scoring brightness |
 | `THROW_TIMEOUT_MS` | 3000 | Fallback miss timeout |

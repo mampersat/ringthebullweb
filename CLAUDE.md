@@ -33,13 +33,13 @@ Note `read_touch()` itself blocks ~10 ms (discharge delay), so the real loop per
 | GP28 | 34 | NeoPixel DIN |
 | GND | e.g. 38 | Common ground; the **hook** connects to GND |
 | VBUS | 40 | 5 V from USB; powers the NeoPixel strip |
-| `"LED"` | onboard | Lit while `hooked`; flashes 600 ms after a timeout miss |
+| `"LED"` | onboard | 5 quick blinks at boot (firmware ready); then lit while `hooked`; flashes 600 ms after a timeout miss |
 
 GPIO number ≠ physical pin number. Double-check orientation when wiring.
 
 ## Sensing principles
 
-**Capacitive grab** (`read_touch`): drive GP14 and GP15 low for 10 ms to discharge, make GP15 a floating input, drive GP14 high, time until GP15 reads high through the 1 MΩ. A held ring adds body capacitance → longer time. Prototype values: untouched 50–59 µs, held 90–100 µs. `GRAB_THRESHOLD = 80`, `RELEASE_THRESHOLD = 70` (hysteresis). These were measured on the prototype wiring; a ~12 ft wire run shifts the baseline, so thresholds are likely to need retuning. The value is a relative timing, not farads.
+**Capacitive grab** (`read_touch`): drive GP14 and GP15 low for 10 ms to discharge, make GP15 a floating input, drive GP14 high, time until GP15 reads high through the 1 MΩ. A held ring adds body capacitance → longer time. Logged on the installed wiring (`diag_capacitance.py`): untouched 52–117 µs, held ~1,100–6,000 µs (transitions briefly dip to ~200). `GRAB_THRESHOLD = 500`, `RELEASE_THRESHOLD = 300` (hysteresis). The original prototype values (80/70) sat inside the untouched range of the long wire run. The value is a relative timing, not farads.
 
 **Hook contact** (`read_hook`): GP14 → input, GP15 → input with pull-up, 200 µs settle, LOW = ring touching grounded hook; then pins are restored for cap-sensing. The hook needs no switch or modification.
 
@@ -51,7 +51,7 @@ States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
 - `HELD` → `IN_FLIGHT`: cap ≤ `RELEASE_THRESHOLD` for `RELEASE_DEBOUNCE_MS`; `throws += 1`.
 - `IN_FLIGHT`:
   - `hooked` → hit, `LANDED` (**hook is checked first and wins over regrab**).
-  - after `MIN_FLIGHT_MS`, cap ≥ grab for `GRAB_DEBOUNCE_MS` → miss, back to `HELD` ("MISS - REGRABBED").
+  - after `MIN_FLIGHT_MS` and `HOOK_REGRAB_GUARD_MS` since the last hook contact, cap ≥ grab for `GRAB_DEBOUNCE_MS` → miss, back to `HELD` ("MISS - REGRABBED").
   - `THROW_TIMEOUT_MS` → miss, `WAIT_RESET` (LED flashes).
 - `LANDED` → `WAIT_RESET` when ring is unhooked.
 - `WAIT_RESET` → `HELD`: after `POST_THROW_LOCKOUT_MS` (measured from `throw_started`), grab detected.
@@ -61,15 +61,16 @@ States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `GRAB_DEBOUNCE_MS` | 150 | Confirm grab / regrab |
-| `RELEASE_DEBOUNCE_MS` | 250 | Confirm release (throw) |
+| `GRAB_DEBOUNCE_MS` | 150 | Confirm grab / regrab (via `grab_confirmed()`: ≥ `GRAB_MIN_HITS` = 3 highs within the window, dropouts up to `GRAB_GLITCH_MS` = 250 bridged, because a held ring reads in bursts) |
+| `RELEASE_DEBOUNCE_MS` | 450 | Confirm release (throw); a held ring reads low for up to ~200 ms between bursts, so this must exceed that |
 | `HOOK_DEBOUNCE_MS` | 300 | Contact must persist to count as hooked |
 | `UNHOOK_DEBOUNCE_MS` | 100 | Confirm hook removal |
+| `HOOK_REGRAB_GUARD_MS` | 600 | In flight, ignore a regrab within this long of any hook contact (a ring bouncing on the hook reads high between contacts and looks like a grab) |
 | `MIN_FLIGHT_MS` | 250 | Ignore regrab right after release |
 | `THROW_TIMEOUT_MS` | 3000 | Fallback miss if nothing happens |
 | `POST_THROW_LOCKOUT_MS` | 250 | Ignore grabs just after a timeout miss |
 | `RESET_TAPS` / `RESET_WINDOW_MS` | 3 / 2000 | Triple-tap reset gesture |
-| `RESET_CONTACT_MS` / `RESET_RELEASE_MS` | 50 / 50 | Min contact / separation per tap |
+| `RESET_CONTACT_MS` / `RESET_RELEASE_MS` | 150 / 150 | Min contact / separation per tap |
 | `ATTRACT_IDLE_MS` | 300000 | Idle time before attract mode |
 | `ATTRACT_INTERVAL_MS` | 180 | Attract step rate |
 | `SAMPLE_INTERVAL_MS` | 20 | Loop sleep |
@@ -79,19 +80,20 @@ States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
 
 ## NeoPixels
 
-`PIXEL_COUNT = 100` in firmware (physical install is ~22 pixels), `BRIGHTNESS = 0.15` applied by `color()`. Pixel 0 = current state; pixels 1+ = throw history (green hit / red miss), wrapping modulo `PIXEL_COUNT - 1`. Pixel 0: blinking red = held, blue = in flight, green = hooked/landed, red after a miss in `WAIT_RESET`. The active throw's history slot mirrors the live state (blinking red / blue) until finalized.
+`PIXEL_COUNT = 100` in firmware (physical install is ~22 pixels), `BRIGHTNESS = 0.15` applied by `color()`. The strip is a score line: pixel *i* = throw *i+1*, locked green (hit) / red (miss), wrapping modulo `SCORE_PIXELS` (22). There is no separate state pixel. The next free location (`len(history)`) shows live status: **purple** with brightness = live `read_touch()` on a log scale (`CAP_PIXEL_MIN_US` 50 → `CAP_PIXEL_MAX_US` 5000, floor `CAP_PIXEL_FLOOR`); **blue** while `IN_FLIGHT`; **blinking white** while `hooked` / `LANDED` until the ring is grabbed again. Dark when capacitance can't be read and the ring isn't hooked.
 
 **Attract mode**: uses the first `ATTRACT_PIXELS` (22). One pixel sweeps 0→21 with ±1 and ±2 dim neighbours (`ATTRACT_MAIN` 0.07, `ATTRACT_NEIGHBOR` 0.018, `ATTRACT_OUTER` 0.006), colour cycling red → white → blue. Active only in `READY` / `WAIT_RELEASE` / `WAIT_RESET` and after `ATTRACT_IDLE_MS` without activity. `last_activity` is pre-set to `now - ATTRACT_IDLE_MS` at boot and in `reset_game()` so attract starts immediately. The ±2 pixels at 0.6% quantize to ~1/255 and may be invisible.
 
 ## Reset gesture
 
-Three contacts of ≥50 ms, each separated by ≥50 ms, within 2 s of the first. Allowed in any state except `IN_FLIGHT` (where the tracker is cleared). `reset_game()` clears counts/history/debounce trackers, sets `WAIT_RELEASE`, flashes white 3×, and re-enters attract. Note it blocks ~720 ms.
+Three contacts of ≥150 ms, each separated by ≥150 ms, within 2 s of the first. Allowed in any state except `IN_FLIGHT` (where the tracker is cleared). `reset_game()` clears counts/history/debounce trackers, sets `WAIT_RELEASE`, flashes white 3×, and re-enters attract. Note it blocks ~720 ms.
 
 ## Running and debugging
 
 - Deploy: copy `main.py` to the Pico as `main.py` (e.g. `mpremote cp main.py :main.py` then `mpremote reset`, or Thonny). It then runs on boot.
 - Try without installing: `mpremote run main.py`.
 - Strip check: `mpremote run test_neopixel.py`.
+- Debug log: `LOG_ENABLED` writes `game_log.csv` on the Pico (`ms,state,cap_us,contact,hooked,event`, buffered, appended across boots and never erased, flushed every 1 s, idle rows thinned to 1/s, nothing logged while the ring isn't wired (timeout with no contact), stops when < 150 KB flash is free). Pull with `mpremote cp :game_log.csv .`. Set False for normal use.
 - Dashboard: connect a real serial terminal (`mpremote connect /dev/ttyACM0`, `screen /dev/ttyACM0 115200`, minicom). It uses ANSI clear/home (`\033[H\033[2J`), so IDE consoles without ANSI support will look garbled. It shows state, µs reading (or GROUNDED/TIMEOUT), hook/hooked, counts, throw time left, reset taps, last event.
 - There is no host-side test suite; the firmware imports `machine`/`neopixel` and starts its loop on import, so it can't be imported on a PC. Verify on hardware.
 - To tune thresholds, watch the live µs reading with the ring untouched vs. held on the real installation.
