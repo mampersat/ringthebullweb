@@ -43,7 +43,7 @@ There's also a simple phone [score-keeper web app](#phone-score-keeper-web-app) 
 | GP28 | 34 | NeoPixel data (DIN) |
 | GND | e.g. 38 | Ground, hook connection, strip ground |
 | VBUS | 40 | 5 V from USB; powers the NeoPixel strip |
-| Onboard LED | internal | Lit when hooked; flashes on a timeout miss |
+| Onboard LED | internal | 5 blinks at boot; then lit whenever the ring is touching the hook (live contact check) |
 
 GPIO numbers and physical pin numbers differ. Check the board orientation before wiring.
 
@@ -127,7 +127,7 @@ Pixel 1 is throw 1, pixel 2 is throw 2, and so on.
 
 Finished throws keep their red or green until reset. History wraps around after 22 throws.
 
-If the ring is thrown and nothing happens for 3 seconds, a miss is recorded and the onboard LED flashes briefly.
+If the ring is thrown and nothing happens for 3 seconds, a miss is recorded.
 
 ## Resetting the game
 
@@ -145,7 +145,7 @@ Everything is a constant near the top of `main.py`:
 |---|---|---|
 | `GRAB_THRESHOLD` / `RELEASE_THRESHOLD` | 500 / 300 | Cap-sense µs thresholds |
 | `PIXEL_COUNT` | 100 | Strip length in firmware |
-| `BRIGHTNESS` | 0.15 | Scoring brightness |
+| `BRIGHTNESS` | 0.07 | Scoring brightness |
 | `THROW_TIMEOUT_MS` | 3000 | Fallback miss timeout |
 | `ATTRACT_IDLE_MS` | 5 min | Idle time before attract mode |
 | `ATTRACT_PIXELS` | 22 | Pixels used by the attract sweep |

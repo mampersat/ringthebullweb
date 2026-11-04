@@ -33,7 +33,7 @@ Note `read_touch()` itself blocks ~10 ms (discharge delay), so the real loop per
 | GP28 | 34 | NeoPixel DIN |
 | GND | e.g. 38 | Common ground; the **hook** connects to GND |
 | VBUS | 40 | 5 V from USB; powers the NeoPixel strip |
-| `"LED"` | onboard | 5 quick blinks at boot (firmware ready); then lit while `hooked`; flashes 600 ms after a timeout miss |
+| `"LED"` | onboard | 5 quick blinks at boot (firmware ready); then lit whenever `read_hook()` sees ring-to-hook contact (raw, not debounced), a quick check that the ring wire and hook ground are good |
 
 GPIO number ≠ physical pin number. Double-check orientation when wiring.
 
@@ -52,7 +52,7 @@ States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
 - `IN_FLIGHT`:
   - `hooked` → hit, `LANDED` (**hook is checked first and wins over regrab**).
   - after `MIN_FLIGHT_MS` and `HOOK_REGRAB_GUARD_MS` since the last hook contact, cap ≥ grab for `GRAB_DEBOUNCE_MS` → miss, back to `HELD` ("MISS - REGRABBED").
-  - `THROW_TIMEOUT_MS` → miss, `WAIT_RESET` (LED flashes).
+  - `THROW_TIMEOUT_MS` → miss, `WAIT_RESET`.
 - `LANDED` → `WAIT_RESET` when ring is unhooked.
 - `WAIT_RESET` → `HELD`: after `POST_THROW_LOCKOUT_MS` (measured from `throw_started`), grab detected.
 - `WAIT_RELEASE`: entered only by `reset_game()`; → `READY` once ring is released (not in contact, not hooked, cap ≤ release threshold for `RELEASE_DEBOUNCE_MS`).
@@ -80,7 +80,7 @@ States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
 
 ## NeoPixels
 
-`PIXEL_COUNT = 100` in firmware (physical install is ~22 pixels), `BRIGHTNESS = 0.15` applied by `color()`. The strip is a score line: pixel *i* = throw *i+1*, locked green (hit) / red (miss), wrapping modulo `SCORE_PIXELS` (22). There is no separate state pixel. The next free location (`len(history)`) shows live status: **purple** with brightness = live `read_touch()` on a log scale (`CAP_PIXEL_MIN_US` 50 → `CAP_PIXEL_MAX_US` 5000, floor `CAP_PIXEL_FLOOR`); **blue** while `IN_FLIGHT`; **blinking white** while `hooked` / `LANDED` until the ring is grabbed again. Dark when capacitance can't be read and the ring isn't hooked.
+`PIXEL_COUNT = 100` in firmware (physical install is ~22 pixels), `BRIGHTNESS = 0.07` applied by `color()`. The strip is a score line: pixel *i* = throw *i+1*, locked green (hit) / red (miss), wrapping modulo `SCORE_PIXELS` (22). There is no separate state pixel. The next free location (`len(history)`) shows live status: **purple** with brightness = live `read_touch()` on a log scale (`CAP_PIXEL_MIN_US` 50 → `CAP_PIXEL_MAX_US` 5000, floor `CAP_PIXEL_FLOOR`; uses its own `PURPLE_BRIGHTNESS` = 0.15, independent of `BRIGHTNESS`); **blue** while `IN_FLIGHT`; **blinking white** while `hooked` / `LANDED` until the ring is grabbed again. Dark when capacitance can't be read and the ring isn't hooked.
 
 **Attract mode**: uses the first `ATTRACT_PIXELS` (22). One pixel sweeps 0→21 with ±1 and ±2 dim neighbours (`ATTRACT_MAIN` 0.07, `ATTRACT_NEIGHBOR` 0.018, `ATTRACT_OUTER` 0.006), colour cycling red → white → blue. Active only in `READY` / `WAIT_RELEASE` / `WAIT_RESET` and after `ATTRACT_IDLE_MS` without activity. `last_activity` is pre-set to `now - ATTRACT_IDLE_MS` at boot and in `reset_game()` so attract starts immediately. The ±2 pixels at 0.6% quantize to ~1/255 and may be invisible.
 

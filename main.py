@@ -27,7 +27,7 @@ led = Pin("LED", Pin.OUT)
 
 PIXEL_PIN = 28
 PIXEL_COUNT = 100
-BRIGHTNESS = 0.15
+BRIGHTNESS = 0.07
 
 pixels = neopixel.NeoPixel(
     Pin(PIXEL_PIN, Pin.OUT), PIXEL_COUNT
@@ -47,7 +47,13 @@ RED = color(255, 0, 0)
 GREEN = color(0, 255, 0)
 BLUE = color(0, 0, 255)
 WHITE = color(255, 255, 255)
-PURPLE = color(160, 0, 255)
+# Capacitance pixel keeps its own (brighter) scale, independent of BRIGHTNESS
+PURPLE_BRIGHTNESS = 0.15
+PURPLE = (
+    int(160 * PURPLE_BRIGHTNESS),
+    0,
+    int(255 * PURPLE_BRIGHTNESS)
+)
 
 # ------------------------------------------
 # CONFIGURATION
@@ -152,7 +158,6 @@ hook_candidate_since = None
 unhook_candidate_since = None
 
 throw_started = None
-miss_flash_until = None
 
 last_event = "SYSTEM READY"
 last_cap = None
@@ -262,7 +267,7 @@ def reset_game():
     global touch_candidate_since
     global hook_candidate_since
     global unhook_candidate_since
-    global throw_started, miss_flash_until
+    global throw_started
     global last_event, last_activity
     global reset_tap_count, reset_first_tap
     global reset_contact_since, reset_release_since
@@ -282,7 +287,6 @@ def reset_game():
     unhook_candidate_since = None
 
     throw_started = None
-    miss_flash_until = None
 
     reset_tap_count = 0
     reset_first_tap = None
@@ -700,9 +704,6 @@ while True:
             history.append(False)
             state = WAIT_RESET
             touch_candidate_since = None
-            miss_flash_until = time.ticks_add(
-                now, 600
-            )
             last_activity = now
             last_event = "MISS - TIMEOUT"
 
@@ -740,21 +741,9 @@ while True:
         else:
             touch_candidate_since = None
 
-    # LED
-    if hooked:
-        led.on()
-
-    elif miss_flash_until is not None:
-        if time.ticks_diff(
-            now, miss_flash_until
-        ) < 0:
-            led.value((now // 100) % 2)
-        else:
-            miss_flash_until = None
-            led.off()
-
-    else:
-        led.off()
+    # LED: on while the ring is electrically touching the hook
+    # (raw contact, not debounced), so a bad ring/wire joint is visible
+    led.value(1 if contact else 0)
 
     # Attract mode after 5 minutes inactivity
     attracting = (
