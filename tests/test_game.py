@@ -77,12 +77,13 @@ class GameTests(unittest.TestCase):
         self.assertEqual(ns['history'], [True] * 21)
         self.assertEqual(records.json.loads(Path(self.path).read_text())['best'], 21)
         self.samples(1500, False, 20)
-        self.samples(50, False, 40)
         self.assertEqual(ns['throws'], 21)
+        self.assertTrue(ns['web_status']()['complete'])
         self.assertTrue(ns['web_action']('undo'))
         self.assertEqual((ns['throws'], ns['hits'], ns['misses']), (20, 20, 0))
         self.assertEqual(ns['state'], ns['WAIT_RELEASE'])
         self.assertEqual(ns['records'].values, (0, 20))
+        self.assertIsNone(ns['last_completed'])
         self.samples(50, False, 25)
         self.assertEqual(records.json.loads(Path(self.path).read_text())['best'], 0)
         self.samples(1500, False, 12)
@@ -99,10 +100,77 @@ class GameTests(unittest.TestCase):
         ns.update(history=[True, False] * 10, hits=10, misses=10, throws=21,
                   throw_started=self.now, state=ns['IN_FLIGHT'])
         self.samples(1500, False, 30)
-        self.assertEqual(ns['state'], ns['COMPLETE'])
+        self.assertTrue(ns['web_status']()['complete'])
         self.assertEqual((ns['hits'], ns['misses']), (10, 11))
         for _ in range(3):
             self.samples(1500, True, 10)
             self.samples(1500, False, 10)
         self.assertEqual(ns['history'], [])
         self.assertEqual(ns['records'].values, (10, 1))
+
+    def check_rollover(self, final):
+        ns = self.ns
+        ns['web'] = None  # No browser or networking is needed for rollover.
+        ns.update(history=[True] * 20, hits=20, throws=20, state=ns['HELD'])
+        ns['records'].observe(ns['history'])
+        self.samples(50, False, 25)
+        self.assertEqual(ns['throws'], 21)
+        self.assertFalse(ns['web_status']()['complete'])
+        if final == 'hit':
+            self.samples(50, True, 18)
+        elif final == 'regrab':
+            self.samples(1500, False, 30)
+        else:
+            self.samples(50, False, 155)
+        self.assertEqual(len(ns['history']), 21)
+        completed = ns['last_completed']
+        self.assertEqual(len(completed['history']), 21)
+        self.assertIsNot(completed['history'], ns['history'])
+        best = 21 if final == 'hit' else 20
+        self.assertEqual(ns['records'].values, (best, 20 if final != 'hit' else 21))
+        if final != 'regrab':
+            self.samples(1500, False, 22)
+        # For regrab, this is the release of the ring already caught on shot 21.
+        self.samples(50, False, 25)
+        self.assertEqual((ns['throws'], ns['hits'], ns['misses']), (1, 0, 0))
+        self.assertEqual(ns['state'], ns['IN_FLIGHT'])
+        self.assertEqual(ns['history'], [])
+        self.assertFalse(ns['web_status']()['complete'])
+        self.assertEqual(ns['web_status']()['last_completed'], completed)
+        self.samples(50, False, 155)
+        self.assertEqual((ns['throws'], ns['misses']), (1, 1))
+        self.assertEqual(ns['history'], [False])
+        self.assertTrue(ns['web_action']('undo'))
+        self.assertEqual(ns['throws'], 0)
+        self.assertEqual(ns['last_completed'], completed)
+        self.assertEqual(ns['records'].values[0], best)
+        for _ in range(3):
+            self.samples(1500, True, 10)
+            self.samples(1500, False, 10)
+        self.assertEqual(ns['history'], [])
+        self.assertEqual(ns['last_completed'], completed)
+        self.assertEqual(ns['records'].values[0], best)
+
+    def test_offline_20_21_22_hit(self):
+        self.check_rollover('hit')
+
+    def test_offline_20_21_22_regrab(self):
+        self.check_rollover('regrab')
+
+    def test_offline_20_21_22_timeout(self):
+        self.check_rollover('timeout')
+
+    def test_undo_completion_restores_previous_archive_and_record_baseline(self):
+        ns = self.ns
+        prior = dict(hits=10, misses=11, throws=21, history=[True, False] * 10 + [False])
+        ns['records'].observe(prior['history'], save=True)
+        ns['records'].reset()
+        ns.update(last_completed=prior, history=[True] * 20, hits=20, throws=21,
+                  state=ns['IN_FLIGHT'], throw_started=self.now)
+        self.samples(50, True, 18)
+        self.assertEqual(ns['last_completed']['hits'], 21)
+        self.assertTrue(ns['web_action']('undo'))
+        self.assertEqual(ns['last_completed'], prior)
+        self.assertEqual(ns['records'].values, (10, 20))
+        self.samples(50, False, 25)
+        self.assertEqual(records.json.loads(Path(self.path).read_text())['best'], 10)

@@ -60,8 +60,7 @@ try:
     assert ns['state'] == ns['COMPLETE']
     assert original_records(path).values == (21, 21)
     samples(1500, False, 30)
-    samples(50, False, 30)
-    assert ns['throws'] == 21
+    assert ns['throws'] == 21 and ns['web_status']()['complete']
     response = server._response(b'POST /undo HTTP/1.1\r\nHost: pico\r\n\r\n')
     assert b'200 OK' in response and ns['throws'] == 20
     samples(50, False, 25)
@@ -75,8 +74,36 @@ try:
     assert b'200 OK' in response and not ns['history']
     samples(50, False, 1)
     assert original_records(path).values == (20, 20)
-    print('PASS Pico: resolved throw 21, freeze, POST undo/corrected checkpoint, timeout completion, POST reset preserves records')
+    print('PASS Pico: resolved throw 21, POST undo/corrected checkpoint, timeout completion, POST reset preserves records')
     print('PASS Pico: offline scoring with WLAN disabled; atomic overwrite and record reload')
+    for ending in ('hit', 'regrab', 'timeout'):
+        ns['reset_game'](flash=False)
+        ns.update(history=[True] * 20, hits=20, misses=0, throws=20, state=ns['HELD'])
+        ns['records'].observe(ns['history'])
+        samples(50, False, 25)
+        assert ns['throws'] == 21 and not ns['web_status']()['complete']
+        if ending == 'hit':
+            samples(50, True, 18)
+        elif ending == 'regrab':
+            samples(1500, False, 30)
+        else:
+            samples(50, False, 155)
+        assert len(ns['history']) == 21
+        completed = ns['last_completed']
+        if ending != 'regrab':
+            samples(1500, False, 22)
+        samples(50, False, 25)
+        assert ns['throws'] == 1 and ns['state'] == ns['IN_FLIGHT']
+        assert ns['history'] == [] and ns['last_completed'] == completed
+        samples(50, False, 155)
+        assert ns['history'] == [False] and ns['throws'] == 1
+        assert ns['web_action']('undo') and ns['throws'] == 0
+        assert ns['last_completed'] == completed
+        for _ in range(3):
+            samples(1500, True, 10)
+            samples(1500, False, 10)
+        assert not ns['history'] and ns['last_completed'] == completed
+        print('PASS offline 20->21->22:', ending, 'final shot; next release counted as shot 1; undo/reset retain archive')
     print('RTC calendar:', real_time.localtime()[:3], '(no clock synchronization configured; weekly streak deferred)')
 finally:
     for name in (path, path + '.tmp'):

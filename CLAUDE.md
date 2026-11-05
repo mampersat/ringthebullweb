@@ -48,7 +48,7 @@ GPIO number ≠ physical pin number. Double-check orientation when wiring.
 ## State machine
 
 States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`, `COMPLETE`.
-The 21st resolved throw enters COMPLETE; sensing/LEDs/reset continue but no new throws count.
+The 21st resolved throw archives the completed card and enters COMPLETE. A physical grab (or the already-confirmed re-catch) moves to HELD; the next confirmed release folds records into the prior-games baseline, clears counters/history, and counts shot 1 immediately. No browser/reset is required. The completed card stays undoable until that release; `last_completed` retains the share result across rollover/reset in RAM. Undo of shot 21 restores the previous archive and recomputes records.
 
 - `READY` → `HELD`: cap ≥ `GRAB_THRESHOLD` for `GRAB_DEBOUNCE_MS`.
 - `HELD` → `IN_FLIGHT`: cap ≤ `RELEASE_THRESHOLD` for `RELEASE_DEBOUNCE_MS`; `throws += 1`.

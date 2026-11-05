@@ -37,7 +37,7 @@ The Pico runs the game, drives an LED score strip, and serves a phone scoreboard
 ## What works today
 
 - **Automatic scoring:** capacitive grab/release sensing plus electrical ring-to-hook contact. A re-catch or three-second timeout records a miss.
-- **21-shot games:** completion waits for the final throw's result. No throw 22 sneaks in.
+- **21-shot games:** completion waits for the final result. The next physical grab/release starts a new game automatically; no web reset is needed.
 - **Phone scoreboard:** a compact 7×3 history grid, shots left, hits/misses, current action/state, high score, best streak, and accuracy.
 - **Undo and Start Over:** undo corrects the latest resolved throw and records; reset keeps records. A physical triple-tap gesture also resets the game.
 - **Share:** completed scores become a green/red emoji grid plus the device URL. Native sharing falls back to copying or a manual copy prompt.
@@ -52,11 +52,13 @@ The Pico runs the game, drives an LED score strip, and serves a phone scoreboard
 1. **Grab the ring.** Body capacitance tells the Pico you're holding it.
 2. **Swing and release.** The throw counter advances; its block stays pending until the result arrives.
 3. **Land it or catch it.** A confirmed hook contact scores a hit. Re-catching the ring scores a miss; a three-second timeout is the fallback.
-4. **Finish throw 21.** The game freezes only after that throw resolves. Share the result or start over.
+4. **Finish throw 21, then keep playing.** Its result finalizes the game and records. The next grab/release starts a fresh game, and that release counts as shot 1.
 
 The grid is green for hits, red for misses, and gray for pending throws. An outlined pending block marks the ring in flight. Shots left counts unresolved throws; accuracy uses hits divided by throws started.
 
-**Undo** is available between throws, including after completion. It removes the latest resolved throw and waits for ring release before resuming. It is unavailable during flight or with an empty history. **Start Over** asks for confirmation, clears the current game, and preserves records.
+The final card stays visible until the next throw starts. **Share last game** keeps its emoji result available during the next game and after reset. Only the latest completed card is shared; that archive is RAM-only and clears on reboot.
+
+**Undo** is available between throws, including after completion. It removes the latest resolved throw and waits for ring release before resuming. Before the next game starts, undoing shot 21 reopens the completed card and corrects its records/archive; once the next game has started, undo applies to that game. It is unavailable during flight or with an empty history. **Start Over** asks for confirmation, clears the current game, and preserves records.
 
 For a phone-free reset, touch the ring to the hook **three times within two seconds**, with at least 150 ms of contact and 150 ms of separation per tap. This is disabled during flight. The strip flashes white three times, then the game waits for release. Web controls skip that blocking flash.
 
@@ -74,7 +76,7 @@ For a phone-free reset, touch the ring to the hook **three times within two seco
 
 `records.json` stores the best **completed** score and longest consecutive hit streak within one game. Streaks update on screen immediately; flash checkpoints happen on completion, reset, or undo, only when record values change. An unfinished game's streak is retained when you reset. Undo can retract a current-game record without losing earlier games' records.
 
-Saves run outside active throw sensing, using a flushed temporary file and atomic rename on Pico LittleFS. Failed saves show an error and retry after 30 seconds in a safe state. Uncheckpointed streak gains can be lost on power-off. Reboot preserves records but starts a fresh game with no undo history.
+Saves run outside active throw sensing, using a flushed temporary file and atomic rename on Pico LittleFS. Failed saves show an error and retry after 30 seconds in a safe state. Uncheckpointed streak gains can be lost on power-off. Reboot preserves records but starts a fresh game with no undo or completed-card history.
 
 ## Pico W wiring
 
@@ -146,7 +148,9 @@ Use your device's actual serial port. Keep `records.json` on the Pico when updat
 
 ### Open the web UI
 
-Connect the phone to the same network. The serial console prints `Scoreboard: http://<DHCP-IP>/` when the listener starts; your router's DHCP leases also show the address. Open that URL, then scan the QR to bring another phone to the same local page.
+Connect the phone to the same network and open **http://ringthebull.local/**. Firmware sets `network.hostname('ringthebull')` before Wi-Fi initialization and uses MicroPython's built-in mDNS support; no extra responder or firmware reflash is needed. Host mDNS resolution and HTTP were verified on Pico W / MicroPython 1.29.0. Phone resolution still needs confirmation.
+
+If your client or network does not support mDNS, use the DHCP IP instead. The serial console prints `Scoreboard: http://<DHCP-IP>/` when the listener starts; your router's DHCP leases also show the address. Scan the QR to bring another phone to the same local page. After changing the hostname, use a hard reset/power cycle so it applies on a fresh connection (`ampy --port /dev/ttyACM0 reset --hard`).
 
 The self-contained page is about **12 KB**. It polls `/status` **500 ms after each request finishes**. The QR is generated once in the browser from `location.origin`; sharing uses that same origin, so neither depends on a hardcoded device address.
 
@@ -182,7 +186,8 @@ Plain HTTP on the Pico's local address. Responses are uncached. Mutations take a
 | `history` | Ordered booleans: `true` hit, `false` miss; at most 21 |
 | `state` | `READY`, `HELD`, `IN FLIGHT`, `LANDED`, `WAIT RESET`, `WAIT RELEASE`, or `COMPLETE` |
 | `hook` | Raw electrical contact, before debounce |
-| `complete`, `can_undo` | Game completion and current undo availability |
+| `complete`, `can_undo` | Whether the current card has 21 resolved results, and current undo availability |
+| `last_completed` | Latest completed card (`throws`, `hits`, `misses`, `history`), or `null`; retained across rollover/reset, corrected by undo |
 | `best`, `longest_streak` | Best completed score and longest streak, including the current game's applicable contribution |
 | `records_error` | Storage error message, or `null` |
 | `uptime` | Seconds since web-server initialization; game reset does not reset it |

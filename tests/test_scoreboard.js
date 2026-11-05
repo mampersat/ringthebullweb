@@ -86,6 +86,11 @@ const pageHtml = execFileSync('python3', ['-c', 'import web_server; import sys; 
   assert.deepEqual(calls,['/undo','/reset']);
   assert.equal(await page.$$eval('.shot.pending',els=>els.length),21);
   assert.equal(await page.$eval('#left',e=>e.textContent),'21');
-  console.log('PASS mobile UI: 7x3 grid, phone layouts, QR decoding, sharing, undo/reset');
+  state={...state,last_completed:{hits:20,misses:1,throws:21,history:[...Array(20).fill(true),false]}};
+  await page.waitForFunction(()=>document.getElementById('share').textContent==='Share last game');
+  await page.click('#share');
+  assert.equal(await page.evaluate(()=>window.manualCopy),text);
+  assert.equal(await page.$eval('#throws',e=>e.textContent),'0');
+  console.log('PASS mobile UI: 7x3 grid, phone layouts, QR, sharing last game after rollover/reset');
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});

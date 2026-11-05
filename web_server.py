@@ -33,7 +33,7 @@ const slots=[];
 for(let i=0;i<21;i++){const slot=document.createElement('span');slot.className='shot';slot.textContent=i+1;
  document.getElementById('history').appendChild(slot);slots.push(slot);}
 const actions={'READY':'Grab the ring','HELD':'Swing and release','IN FLIGHT':'Ring in flight',
- 'LANDED':'Take ring off hook','WAIT RESET':'Grab the ring','WAIT RELEASE':'Release ring to continue','COMPLETE':'Game complete'};
+ 'LANDED':'Take ring off hook','WAIT RESET':'Grab the ring','WAIT RELEASE':'Release ring to continue','COMPLETE':'Game complete - grab for next game'};
 let latest=null;
 let actionBusy=false;
 async function update(){
@@ -54,7 +54,8 @@ async function update(){
   });
   document.getElementById('connection').textContent='Live';
   document.getElementById('undo').disabled=actionBusy||!s.can_undo;
-  document.getElementById('share').disabled=!s.complete;
+  document.getElementById('share').disabled=!(s.last_completed||s.complete);
+  document.getElementById('share').textContent=s.last_completed&&!s.complete?'Share last game':'Share';
   document.getElementById('recordsError').textContent=s.records_error||'';
  }catch(e){document.getElementById('connection').textContent='Offline - reconnecting...';}
  finally{clearTimeout(timeout);}
@@ -76,11 +77,12 @@ async function action(name){
 document.getElementById('undo').onclick=()=>action('undo');
 document.getElementById('reset').onclick=()=>action('reset');
 document.getElementById('share').onclick=async()=>{
- if(!latest||!latest.complete)return;
- const rows=[];for(let i=0;i<latest.history.length;i+=7){
-  rows.push(latest.history.slice(i,i+7).map(hit=>String.fromCodePoint(hit?0x1f7e9:0x1f7e5)).join(''));
+ const result=latest&&(latest.last_completed||(latest.complete?latest:null));
+ if(!result)return;
+ const rows=[];for(let i=0;i<result.history.length;i+=7){
+  rows.push(result.history.slice(i,i+7).map(hit=>String.fromCodePoint(hit?0x1f7e9:0x1f7e5)).join(''));
  }
- const text='Ring the Bull: '+latest.hits+'/21'+String.fromCharCode(10,10)+rows.join(String.fromCharCode(10))+
+ const text='Ring the Bull: '+result.hits+'/21'+String.fromCharCode(10,10)+rows.join(String.fromCharCode(10))+
   String.fromCharCode(10,10)+location.origin+'/';
  if(navigator.share){try{await navigator.share({title:'Ring the Bull',text});return;}
   catch(e){if(e.name==='AbortError')return;}}
@@ -188,6 +190,11 @@ class WebServer:
         self.uptime_ms = 0
         # No scans, DNS, static IP changes, or waits for association/DHCP.
         import network
+        # DHCP and built-in mDNS take the name when the interface starts.
+        try:
+            network.hostname('ringthebull')
+        except (AttributeError, OSError, ValueError):
+            print('Hostname unavailable; use the DHCP IP address')
         self.wlan = network.WLAN(network.STA_IF)
         try:
             import wifi_config

@@ -64,7 +64,7 @@ class WebTests(unittest.TestCase):
         self.now = 0
         self.connected = True
         self.wlan = types.SimpleNamespace(isconnected=lambda: self.connected)
-        network = types.SimpleNamespace(STA_IF=0, WLAN=lambda _: self.wlan)
+        network = types.SimpleNamespace(STA_IF=0, WLAN=lambda _: self.wlan, hostname=lambda _: None)
         self.patches = [
             patch.dict(sys.modules, network=network, wifi_config=None),
             patch.object(web.time, 'ticks_ms', lambda: self.now, create=True),
@@ -200,11 +200,20 @@ class WebTests(unittest.TestCase):
         self.wlan.connect = lambda ssid, password: calls.append(('connect', ssid, password))
         config = types.SimpleNamespace(WIFI_SSID='test', WIFI_PASSWORD='secret')
         self.connected = False
+        network = sys.modules['network']
+        network.hostname = lambda value: calls.append(('hostname', value))
+        network.WLAN = lambda _: calls.append(('interface',)) or self.wlan
         with patch.dict(sys.modules, wifi_config=config):
             server = web.WebServer(lambda: dict(self.state))
             server.poll()
-        self.assertEqual(calls, [('active', True), ('connect', 'test', 'secret')])
+        self.assertEqual(calls, [('hostname', 'ringthebull'), ('interface',), ('active', True), ('connect', 'test', 'secret')])
         self.assertIsNone(server.listener)
+
+    def test_hostname_failure_keeps_ip_server_available(self):
+        with patch.object(sys.modules['network'], 'hostname', side_effect=OSError('unsupported')):
+            with patch('builtins.print'):
+                server = web.WebServer(lambda: dict(self.state))
+        self.assertIs(server.wlan, self.wlan)
 
     def test_listener_hangup_can_recover(self):
         self.tick(self.server.listener, select.POLLHUP)

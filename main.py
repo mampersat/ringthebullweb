@@ -150,6 +150,9 @@ throws = 0
 hits = 0
 misses = 0
 history = []
+last_completed = None
+previous_completed = None
+completed_held = False
 records = Records()
 
 state = READY
@@ -268,7 +271,7 @@ def grab_confirmed(cap, now):
 
 def reset_game(flash=True, preserve_records=True):
     global throws, hits, misses, history
-    global state, hooked
+    global state, hooked, completed_held
     global touch_candidate_since, touch_last_high, touch_high_count
     global last_contact_time
     global hook_candidate_since
@@ -290,6 +293,7 @@ def reset_game(flash=True, preserve_records=True):
 
     state = WAIT_RELEASE
     hooked = False
+    completed_held = False
 
     touch_candidate_since = None
     touch_last_high = None
@@ -609,7 +613,8 @@ def web_status():
     return {
         "hits": hits, "misses": misses, "throws": throws,
         "state": STATE_NAMES[state], "history": history,
-        "hook": last_contact, "complete": state == COMPLETE,
+        "hook": last_contact, "complete": len(history) == GAME_SHOTS,
+        "last_completed": last_completed,
         "best": records.values[0], "longest_streak": records.values[1],
         "records_error": records.error,
         "can_undo": bool(history) and state != IN_FLIGHT,
@@ -617,12 +622,14 @@ def web_status():
 
 
 def web_action(action):
-    global history, throws, hits, misses
+    global history, throws, hits, misses, last_completed
     if action == 'reset':
         reset_game(flash=False)
         return True
     if action != 'undo' or not history or state == IN_FLIGHT:
         return False
+    if len(history) == GAME_SHOTS:
+        last_completed = previous_completed
     shortened = history[:-1]
     # Reuse the existing reset trackers; preserve the prior-games record baseline.
     reset_game(flash=False, preserve_records=False)
@@ -710,6 +717,12 @@ while True:
                 state = IN_FLIGHT
                 touch_candidate_since = None
 
+                if len(history) == GAME_SHOTS:
+                    # Keep the final card undoable until the next actual throw.
+                    # Carry records forward without dropping this release.
+                    records.reset()
+                    throws = hits = misses = 0
+                    history = []
                 throws += 1
                 throw_started = now
                 last_activity = now
@@ -776,6 +789,15 @@ while True:
                 last_activity = now
                 last_event = "GRABBED"
 
+    elif state == COMPLETE:
+        # A re-catch on shot 21 already confirmed the next physical grab.
+        if completed_held or grab_confirmed(cap, now):
+            completed_held = False
+            state = HELD
+            touch_candidate_since = None
+            last_activity = now
+            last_event = "NEXT GAME - RELEASE TO THROW"
+
     elif state == WAIT_RELEASE:
         if (
             not contact
@@ -797,9 +819,15 @@ while True:
 
     if len(history) != resolved_before:
         if len(history) == GAME_SHOTS:
+            previous_completed = last_completed
+            last_completed = {
+                "throws": throws, "hits": hits, "misses": misses,
+                "history": history[:],
+            }
+            completed_held = state == HELD
             state = COMPLETE
             last_event = "GAME COMPLETE: {}/{}".format(hits, GAME_SHOTS)
-        records.observe(history, save=state == COMPLETE)
+        records.observe(history, save=len(history) == GAME_SHOTS)
 
     # LED: on while the ring is electrically touching the hook
     # (raw contact, not debounced), so a bad ring/wire joint is visible
