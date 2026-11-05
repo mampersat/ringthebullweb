@@ -1,1 +1,5 @@
 scripts/node_modules/
+wifi_config.py
+__pycache__/
+records.json
+records.json.tmp

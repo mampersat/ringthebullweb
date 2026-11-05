@@ -4,6 +4,7 @@ import math
 import neopixel
 import os
 import time
+from records import Records
 
 # ==========================================
 # RING THE BULL - Pico W
@@ -128,6 +129,8 @@ IN_FLIGHT = 2
 LANDED = 3
 WAIT_RESET = 4
 WAIT_RELEASE = 5
+COMPLETE = 6
+GAME_SHOTS = 21
 
 STATE_NAMES = {
     READY: "READY",
@@ -135,6 +138,7 @@ STATE_NAMES = {
     IN_FLIGHT: "IN FLIGHT",
     LANDED: "LANDED",
     WAIT_RESET: "WAIT RESET",
+    COMPLETE: "COMPLETE",
     WAIT_RELEASE: "WAIT RELEASE"
 }
 
@@ -146,6 +150,7 @@ throws = 0
 hits = 0
 misses = 0
 history = []
+records = Records()
 
 state = READY
 hooked = False
@@ -261,10 +266,11 @@ def grab_confirmed(cap, now):
 # RESET HANDLING
 # ==========================================
 
-def reset_game():
+def reset_game(flash=True, preserve_records=True):
     global throws, hits, misses, history
     global state, hooked
-    global touch_candidate_since
+    global touch_candidate_since, touch_last_high, touch_high_count
+    global last_contact_time
     global hook_candidate_since
     global unhook_candidate_since
     global throw_started
@@ -273,6 +279,9 @@ def reset_game():
     global reset_contact_since, reset_release_since
     global reset_contact_latched, reset_armed
     global attract_position, attract_color_index
+
+    if preserve_records:
+        records.reset()
 
     throws = 0
     hits = 0
@@ -283,6 +292,9 @@ def reset_game():
     hooked = False
 
     touch_candidate_since = None
+    touch_last_high = None
+    touch_high_count = 0
+    last_contact_time = None
     hook_candidate_since = None
     unhook_candidate_since = None
 
@@ -305,6 +317,9 @@ def reset_game():
 
     last_event = "GAME RESET!"
     led.off()
+
+    if not flash:
+        return
 
     for _ in range(3):
         pixels.fill(WHITE)
@@ -589,8 +604,47 @@ if LOG_ENABLED:
     log = open(LOG_FILE, "a")
     log_marked = False
 
+# Optional network UI; failures leave the offline game running.
+def web_status():
+    return {
+        "hits": hits, "misses": misses, "throws": throws,
+        "state": STATE_NAMES[state], "history": history,
+        "hook": last_contact, "complete": state == COMPLETE,
+        "best": records.values[0], "longest_streak": records.values[1],
+        "records_error": records.error,
+        "can_undo": bool(history) and state != IN_FLIGHT,
+    }
+
+
+def web_action(action):
+    global history, throws, hits, misses
+    if action == 'reset':
+        reset_game(flash=False)
+        return True
+    if action != 'undo' or not history or state == IN_FLIGHT:
+        return False
+    shortened = history[:-1]
+    # Reuse the existing reset trackers; preserve the prior-games record baseline.
+    reset_game(flash=False, preserve_records=False)
+    history = shortened
+    throws = len(history)
+    hits = sum(history)
+    misses = throws - hits
+    records.observe(history, save=True)
+    return True
+
+
+web = None
+try:
+    from web_server import WebServer
+    web = WebServer(web_status, action=web_action)
+except Exception as exc:
+    print("Web UI unavailable:", exc)
+
+
 while True:
     now = time.ticks_ms()
+    resolved_before = len(history)
 
     contact = read_hook()
     last_contact = contact
@@ -741,6 +795,12 @@ while True:
         else:
             touch_candidate_since = None
 
+    if len(history) != resolved_before:
+        if len(history) == GAME_SHOTS:
+            state = COMPLETE
+            last_event = "GAME COMPLETE: {}/{}".format(hits, GAME_SHOTS)
+        records.observe(history, save=state == COMPLETE)
+
     # LED: on while the ring is electrically touching the hook
     # (raw contact, not debounced), so a bad ring/wire joint is visible
     led.value(1 if contact else 0)
@@ -803,5 +863,11 @@ while True:
             if log_free() < LOG_MIN_FREE_BYTES:
                 log.close()
                 log = None
+
+    if web is not None:
+        web.poll()
+
+    if state in (COMPLETE, WAIT_RELEASE):
+        records.flush(time.ticks_ms())
 
     time.sleep_ms(SAMPLE_INTERVAL_MS)

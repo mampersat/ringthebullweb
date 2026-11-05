@@ -6,6 +6,8 @@ Developer guide for **Ring the Bull**, an electronic scorer for the pub game whe
 
 | Path | What it is |
 |---|---|
+| `records.py` | Atomic best-score/streak checkpoints; no per-sample writes. |
+| `web_server.py` | Optional Pico web scoreboard; nonblocking polling. |
 | `main.py` | The entire Pico firmware: single file, runs a single event loop at import time (no `if __name__` guard, no functions to import). |
 | `test_neopixel.py` | Standalone strip test (cycles R/G/B/off on GP28). Not part of the game. |
 | `index.html`, `sw.js`, `manifest.json`, `icons/`, `vendor/`, `deploy.sh`, `scripts/`, `images/` | Separate phone **web score-keeper** (PWA, deployed to S3/CloudFront). Unrelated to the Pico firmware; don't mix the two when editing. |
@@ -45,7 +47,8 @@ GPIO number ≠ physical pin number. Double-check orientation when wiring.
 
 ## State machine
 
-States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`.
+States: `READY`, `HELD`, `IN_FLIGHT`, `LANDED`, `WAIT_RESET`, `WAIT_RELEASE`, `COMPLETE`.
+The 21st resolved throw enters COMPLETE; sensing/LEDs/reset continue but no new throws count.
 
 - `READY` → `HELD`: cap ≥ `GRAB_THRESHOLD` for `GRAB_DEBOUNCE_MS`.
 - `HELD` → `IN_FLIGHT`: cap ≤ `RELEASE_THRESHOLD` for `RELEASE_DEBOUNCE_MS`; `throws += 1`.
@@ -90,12 +93,12 @@ Three contacts of ≥150 ms, each separated by ≥150 ms, within 2 s of the firs
 
 ## Running and debugging
 
-- Deploy: copy `main.py` to the Pico as `main.py` (e.g. `mpremote cp main.py :main.py` then `mpremote reset`, or Thonny). It then runs on boot.
+- Deploy: copy `records.py`, `web_server.py`, and `main.py` to the Pico (e.g. `mpremote cp records.py :records.py`, `mpremote cp web_server.py :web_server.py`, and `mpremote cp main.py :main.py` then `mpremote reset`, or Thonny). It then runs on boot.
 - Try without installing: `mpremote run main.py`.
 - Strip check: `mpremote run test_neopixel.py`.
 - Debug log: `LOG_ENABLED` writes `game_log.csv` on the Pico (`ms,state,cap_us,contact,hooked,event`, buffered, appended across boots and never erased, flushed every 1 s, idle rows thinned to 1/s, nothing logged while the ring isn't wired (timeout with no contact), stops when < 150 KB flash is free). Pull with `mpremote cp :game_log.csv .`. Set False for normal use.
 - Dashboard: connect a real serial terminal (`mpremote connect /dev/ttyACM0`, `screen /dev/ttyACM0 115200`, minicom). It uses ANSI clear/home (`\033[H\033[2J`), so IDE consoles without ANSI support will look garbled. It shows state, µs reading (or GROUNDED/TIMEOUT), hook/hooked, counts, throw time left, reset taps, last event.
-- There is no host-side test suite; the firmware imports `machine`/`neopixel` and starts its loop on import, so it can't be imported on a PC. Verify on hardware.
+- Targeted tests live in `tests/`: host mocks exercise the unchanged state machine, HTTP, and record storage; `pico_games.py` checks synthetic sequences with isolated records on-device. Physical sensing still requires hardware checks.
 - To tune thresholds, watch the live µs reading with the ring untouched vs. held on the real installation.
 
 ## Safety and power
@@ -117,15 +120,20 @@ This is installed and working. When changing it:
 - Keep attract changes separate from game-display changes; the `attracting` condition gates which one draws.
 - Update README and this file when constants or behaviour change.
 
-## Planned work: on-device web server
+## On-device web server
 
-Goal: the Pico W serves a page similar to the web app (`index.html`: 21-shot grid, hit/miss, final score) but driven by the hardware's own `throws` / `hits` / `misses` / `history` instead of manual buttons. **Not implemented.** When building it:
-
-- The main loop is a blocking, timing-sensitive single loop (debounce depends on ~20-30 ms iterations). Don't let networking block it: use non-blocking sockets polled once per iteration, or `asyncio`/`uasyncio` with care, and keep each iteration short.
-- Expose game state read-only from the existing globals (history is a list of booleans).
-- Wi-Fi credentials must not be committed; keep them in a gitignored file.
-- Reuse/adapt `index.html` rather than rewriting the UI, but the web app and firmware are deployed separately today.
+Implemented in `web_server.py`, with a read-only `web_status()` snapshot and one
+`web.poll()` call at the end of each normal game iteration. Uses `select.poll(0)`,
+nonblocking sockets, bounded client I/O, and optional gitignored `wifi_config.py`
+(`WIFI_SSID`, `WIFI_PASSWORD`); otherwise reuses an existing station connection.
+DHCP/IP configuration is left alone. POST undo/reset use `web_action()`, with
+undo disabled during flight and both actions awaiting release. Records checkpoint
+only changed values at completion/reset/undo in safe states. Undo retains the
+prior-games baseline so current-game records can be retracted. Weekly streaks
+are deferred without a synchronized clock. See README for deployment, endpoints, limits,
+and hardware-only checks. Keep networking separate from sensing and game logic.
+The S3 phone app remains separately deployed. Do not add network waits to the loop.
 
 ## Known limitations
 
-Fixed thresholds (no auto-calibration); wire movement/nearby grounded objects shift readings; the 3 s timeout can score a miss while the ring still swings; scores are RAM-only; single player; hook contact must last ≥300 ms to count; `PIXEL_COUNT` (100) exceeds the physical strip (~22).
+Fixed thresholds (no auto-calibration); wire movement/nearby grounded objects shift readings; the 3 s timeout can score a miss while the ring still swings; current scores are RAM-only (records persist); single player; hook contact must last ≥300 ms to count; `PIXEL_COUNT` (100) exceeds the physical strip (~22).

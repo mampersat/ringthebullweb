@@ -94,6 +94,8 @@ The hook is wired to ground. To check for contact, the firmware makes GP15 an in
 3. Copy `main.py` to the Pico as `main.py`, for example with [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
 
    ```sh
+   mpremote cp records.py :records.py
+   mpremote cp web_server.py :web_server.py
    mpremote cp main.py :main.py
    mpremote reset
    ```
@@ -102,7 +104,7 @@ The hook is wired to ground. To check for contact, the firmware makes GP15 an in
 4. Optional: `mpremote run test_neopixel.py` cycles the strip through red/green/blue to verify wiring.
 5. Open a serial terminal to see the dashboard (below).
 
-No network connection is used.
+The game works offline. Optional Wi-Fi provides a live scoreboard; see below.
 
 ### Serial dashboard
 
@@ -125,7 +127,8 @@ Pixel 1 is throw 1, pixel 2 is throw 2, and so on.
 | Red | Miss |
 | Off | Unused |
 
-Finished throws keep their red or green until reset. History wraps around after 22 throws.
+A game finishes when throw 21 resolves as a hit or miss. No throw 22 is counted.
+Finished throws keep their red or green until reset.
 
 If the ring is thrown and nothing happens for 3 seconds, a miss is recorded.
 
@@ -172,15 +175,127 @@ Everything is a constant near the top of `main.py`:
 - Fixed thresholds; automatic baseline calibration and adaptive thresholds would help with long or moving wires.
 - Wire movement and nearby grounded objects affect readings.
 - The 3 s timeout can score a miss while the ring is still swinging.
-- Scores live in RAM and are lost on reboot.
+- Current game scores live in RAM and are lost on reboot; records persist.
 - Single session, no player identification.
 - Hook contact must last long enough to pass the 300 ms debounce.
 - Final strip length, USB supply rating and enclosure are not yet documented.
-- Ideas: multiplayer scorekeeping, remote configuration, persisting scores.
+- Ideas: multiplayer scorekeeping and remote configuration.
 
-## Planned: on-device web server
+## Pico W web scoreboard
 
-The Pico W has Wi-Fi, so the next step is to serve a web page straight from the device. It would look and feel like the [phone score-keeper web app](#phone-score-keeper-web-app) (21-shot grid, hits and misses, final score), but instead of tapping HIT / MISS buttons, the page would show the throws the hardware has actually scored. Nothing for this is implemented yet.
+The Pico can serve a self-contained mobile scoreboard directly over your local
+Wi-Fi. A compact 7-by-3 grid shows all 21 throws (green hit, red miss, gray pending).
+Shots left, hit/miss totals, and the current action/state sit directly below it,
+followed by high score, best streak, accuracy, and Undo / Start Over / Share.
+The bottom QR opens this device's `location.origin` URL. It is generated once in
+the browser by a compact inline encoder (no CDN, network request, or Pico QR work).
+The complete page is about 12 KB; no additional assets are installed on the Pico.
+The page polls every 500 ms after the previous request finishes; failed requests
+show an offline message and retry. There are no external assets. The separate S3
+phone app and its deployment are unchanged.
+
+The server reuses the station interface and any existing Wi-Fi/DHCP setup without
+changing IP configuration. This repository previously contained no Wi-Fi config.
+If the device does not already establish Wi-Fi, create a local `wifi_config.py`
+(gitignored):
+
+```python
+WIFI_SSID = "your-network"
+WIFI_PASSWORD = "your-password"
+```
+
+Copy it to the device, then install all three firmware files and reset:
+
+```sh
+mpremote cp wifi_config.py :wifi_config.py  # only when supplying credentials
+mpremote cp records.py :records.py
+mpremote cp web_server.py :web_server.py
+mpremote cp main.py :main.py
+mpremote reset
+```
+
+On the current development machine, the existing USB tool is `ampy` (the Pico
+appears at `/dev/ttyACM0`):
+
+```sh
+ampy --port /dev/ttyACM0 put records.py /records.py
+ampy --port /dev/ttyACM0 put web_server.py /web_server.py
+ampy --port /dev/ttyACM0 put main.py /main.py
+ampy --port /dev/ttyACM0 reset
+```
+
+When connected, the serial console prints `Scoreboard: http://<DHCP-IP>/` once the
+listener starts. You can also find the address in your router's DHCP leases. Open
+that address on a phone on the same network. No static IP, DNS lookup, or internet
+connection is required. Without credentials or an existing connection, scoring
+continues offline. The optional server module can also be omitted entirely.
+
+Endpoints (responses are not cached):
+
+- `/`: mobile scoreboard with hit/miss history and hit percentage.
+- `/status`: JSON with `hits`, `misses`, `throws`, `state` (dashboard name),
+  `history` (booleans: true = hit), `hook` (raw contact), and `uptime`
+  (seconds since web module initialization, unaffected by game reset), plus
+  `complete`, `can_undo`, `best`, `longest_streak`, and `records_error`.
+- `/health`: HTTP 200 with `ok` while the web service is reachable.
+- `POST /undo`: removes the latest resolved throw, corrects counters and records,
+  and waits for ring release before resuming. Returns 409 during flight or with no
+  history. Undoing a completed game reopens it at 20 resolved throws.
+- `POST /reset`: starts a new game, preserving records; the UI asks for confirmation.
+  Both POST routes take an empty body. GET cannot mutate state. Web reset/undo skip
+  the blocking flash; the physical triple-tap reset keeps its original animation.
+
+Share Results appears for completed games. It shares a green/red emoji history,
+score, and this device's `location.origin` URL, using native sharing when available,
+then clipboard/copy or a manual copy prompt (including browsers on plain HTTP).
+
+Records are the best **completed** 21-shot score and longest consecutive hit streak
+within one game. Current-game streaks are shown immediately. `records.json` is
+checkpointed on completion, reset (including an unfinished game's streak), or undo,
+only when the record values change. Ongoing-game streak improvements can be lost
+if power is removed before a checkpoint. Undo recomputes records against the
+prior-games baseline, so a retracted record is corrected on flash too. Reset
+preserves records; reboot preserves records but starts a fresh game with no undo
+history. Writes use a flushed temporary file and atomic rename on Pico LittleFS;
+failed writes retain the prior checkpoint, display an error, and retry after 30 s.
+Flash saves run only in COMPLETE/WAIT RELEASE, outside active throw sensing.
+Weekly streaks are deferred: no reliable calendar clock synchronization exists.
+
+Wi-Fi association is initiated without waiting; the Pico Wi-Fi driver handles
+connection retries. `select.poll(0)` runs once at the end of each normal game
+iteration. Listening and client sockets are nonblocking, with at most two clients,
+one accept and one 512-byte read/write per ready socket per iteration, a 1 KB
+request-header limit, and a five-second client lifetime. Socket failures are
+contained; disconnects close clients and the listener is recreated on reconnect.
+Listener failures retry after 30 seconds. Initialization failures disable the UI
+until reboot without stopping the game. The existing reset flash still briefly
+pauses the loop and therefore HTTP handling. JSON history is bounded to 21 throws.
+
+Targeted checks:
+
+```sh
+python3 -m unittest discover -s tests -v
+node tests/test_scoreboard.js  # existing scripts/node_modules + Chrome required
+ampy --port /dev/ttyACM0 run tests/pico_games.py  # synthetic, isolated test records
+ampy --port /dev/ttyACM0 reset
+```
+
+**Hardware-only validation still required:** unavailable AP/wrong password,
+disconnect/reconnect, phone rendering/native sharing, and sensor/LED/reset
+behavior under polling and slow clients. Host tests do not measure Wi-Fi driver
+latency, flash logging delays, or Pico heap limits.
+
+USB deployment verified on 2026-11-04 with Pico W MicroPython 1.29.0. Device-side
+response generation and synthetic sensor sequences passed (hit, timeout miss,
+triple-tap reset); the real offline loop restarted without a traceback. Local
+Wi-Fi credentials were subsequently deployed: DHCP succeeded and `/`, `/status`,
+and `/health` returned HTTP 200 over the LAN, with advancing uptime. The 21-shot
+completion/undo/reset and corrected record checkpoints passed on-device with
+synthetic samples and Wi-Fi disabled. Browser tests covered emoji/native/copy
+sharing and reset confirmation. Live POST reset and empty-history undo (409) were
+verified; GET mutations were rejected. Actual sensing
+reported `TIMEOUT`; physical scoring is unverified. LEDs were disconnected and
+their output was not tested.
 
 ---
 
