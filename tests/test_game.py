@@ -63,6 +63,113 @@ class GameTests(unittest.TestCase):
         for _ in range(count):
             exec(self.iteration, self.ns)
 
+    def test_trial_confirms_from_offline_sensor_loop_progress(self):
+        ns=self.ns
+        feeds=[];confirmations=[]
+        ns.update(web=None,ota_watchdog=types.SimpleNamespace(feed=lambda:feeds.append(1)),
+                  ota_boot={'phase':'trial'},ota_iterations=0)
+        def confirm():
+            confirmations.append(1)
+            return {'phase':'stable'}
+        ns['confirm']=confirm
+        self.samples(50,False,1550)
+        self.assertEqual(confirmations,[1])
+        self.assertEqual(len(feeds),1550)
+        self.assertEqual(ns['throws'],0)
+        self.assertEqual(ns['ota_boot']['phase'],'stable')
+
+    def test_update_flushes_log_and_resumes_it_without_changing_game(self):
+        ns=self.ns
+        class Log:
+            text=''
+            closed=False
+            def write(self,text): self.text+=text
+            def flush(self): pass
+            def close(self): self.closed=True
+        capture=Log();commands=[]
+        updater=types.SimpleNamespace(phase='available',poll=lambda safe:None,
+                                      command=lambda action,safe:commands.append((action,safe)) or True)
+        ns.update(log=capture,log_buf=['old sensor row'],updater=updater,
+                  ota_config={'bench_mode':False},last_cap=50,
+                  LOG_FILE=str(Path(self.folder.name)/'log.csv'))
+        self.assertTrue(ns['ota_command']('check'))
+        self.assertEqual(capture.text,'old sensor row\n')
+        self.assertTrue(capture.closed)
+        self.assertEqual(commands,[('check',True)])
+        self.samples(50,False,1)
+        self.assertFalse(ns['ota_log_paused'])
+        self.assertIsNotNone(ns['log']);ns['log'].close()
+        ns['state']=ns['HELD']
+        self.assertFalse(ns['ota_command']('install'))
+        self.assertEqual(ns['throws'],0)
+
+    def test_explicit_bench_allowance_exits_on_first_valid_sample(self):
+        ns=self.ns
+        ns.update(ota_bench=True,last_cap=None,last_contact=False,hooked=False)
+        self.assertTrue(ns['ota_safe']())
+        ns.update(history=[True],throws=1)
+        self.assertFalse(ns['ota_safe']())
+        ns.update(history=[],throws=0)
+        self.samples(50,False,1)
+        self.assertFalse(ns['ota_bench'])
+        self.samples(None,False,1)
+        self.assertFalse(ns['ota_safe']())
+
+    def test_update_gate_stops_on_physical_activity_and_partial_game(self):
+        ns=self.ns
+        ns.update(last_cap=50,last_contact=False,hooked=False,completed_held=False)
+        self.assertTrue(ns['ota_safe']())
+        ns['last_cap']=1500
+        self.assertFalse(ns['ota_safe']())
+        ns['last_cap']=None
+        self.assertFalse(ns['ota_safe']())
+        ns.update(last_cap=50,history=[True],throws=1)
+        self.assertFalse(ns['ota_safe']())
+        ns.update(history=[True]*21,state=ns['COMPLETE'])
+        self.assertTrue(ns['ota_safe']())
+        ns['completed_held']=True
+        self.assertFalse(ns['ota_safe']())
+        ns.update(completed_held=False,last_contact=True)
+        self.assertFalse(ns['ota_safe']())
+
+    def test_scoring_identical_with_diagnostics_open_and_closed(self):
+        results = []
+        for enabled in (False, True):
+            ns = self.ns
+            ns['reset_game'](flash=False)
+            reads = [0, 0]
+            def touch():
+                reads[0] += 1
+                return self.cap
+            def contact():
+                reads[1] += 1
+                return self.contact
+            ns.update(read_touch=touch, read_hook=contact)
+            def poll():
+                if enabled:
+                    before = tuple(reads)
+                    for _ in range(3): ns['sensor_status']()
+                    self.assertEqual(tuple(reads), before)
+            ns['web'] = types.SimpleNamespace(poll=poll)
+            self.samples(50, False, 25)
+            baseline = ns['cap_baseline']
+            self.assertEqual(baseline, 50)
+            self.samples(1500, False, 12)
+            self.assertTrue(ns['sensor_status']()['grabbed'])
+            self.assertEqual(ns['sensor_status']()['delta'], 1450)
+            self.assertEqual(ns['cap_baseline'], baseline)
+            self.samples(50, False, 25)
+            self.samples(50, True, 18)
+            self.assertTrue(ns['sensor_status']()['hook_contact'])
+            self.assertIsNone(ns['sensor_status']()['raw'])
+            self.assertIsNone(ns['sensor_status']()['delta'])
+            self.samples(50, False, 25)
+            self.samples(1500, False, 12)
+            self.samples(50, False, 25)
+            self.samples(50, False, 155)
+            results.append((ns['throws'], ns['hits'], ns['misses'], ns['history'][:]))
+        self.assertEqual(results, [(2, 1, 1, [True, False])] * 2)
+
     def test_finish_only_when_throw_21_resolves_then_undo(self):
         ns = self.ns
         ns.update(history=[True] * 20, hits=20, throws=20, state=ns['HELD'])

@@ -3,3 +3,11 @@ wifi_config.py
 __pycache__/
 records.json
 records.json.tmp
+
+ota_config.json
+ota_state.json*
+ota_game.json*
+releases/
+ota_a/
+ota_b/
+device_backups/

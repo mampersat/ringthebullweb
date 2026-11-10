@@ -91,7 +91,7 @@ class WebTests(unittest.TestCase):
     def request(self, path='/', method='GET'):
         sock = self.attach(('{} {} HTTP/1.1\r\nHost: pico\r\n\r\n'.format(method, path)).encode())
         self.tick(sock, select.POLLIN)
-        for _ in range(500):
+        for _ in range(len(web.PAGE) // sock.limit + 20):
             if sock.closed:
                 break
             before = sock.writes
@@ -124,6 +124,49 @@ class WebTests(unittest.TestCase):
         self.assertNotIn('uptime', self.state)
         self.state.update(hits=0, misses=0, throws=0, history=[], state='WAIT RELEASE')
         self.assertEqual(web.json.loads(self.request('/status')[1])['history'], [])
+
+    def test_debug_is_small_read_only_and_optional(self):
+        self.assertIn(b'404', self.request('/debug')[0])
+        snapshot = dict(raw=650, baseline=75, delta=575, grab_threshold=500,
+                        release_threshold=300, grabbed=True, hook_contact=False)
+        calls = []
+        self.server.diagnostics = lambda: calls.append(1) or dict(snapshot)
+        before = dict(self.state)
+        for _ in range(10):
+            header, body = self.request('/debug')
+            self.assertIn(b'200', header)
+            self.assertEqual(web.json.loads(body), snapshot)
+            self.assertLess(len(body), 256)
+        self.assertEqual(self.state, before)
+        self.assertEqual(len(calls), 10)
+        self.assertIn(b'405', self.request('/debug', 'POST')[0])
+        self.assertEqual(len(calls), 10)
+
+    def test_large_page_is_shared_without_copy_per_client(self):
+        first=self.server._response(b'GET / HTTP/1.1\r\n\r\n')
+        second=self.server._response(b'GET / HTTP/1.1\r\n\r\n')
+        self.assertIs(first[1],web.PAGE)
+        self.assertIs(second[1],web.PAGE)
+
+    def test_ota_requires_key_origin_empty_body_and_safe_game(self):
+        calls = []
+        self.server.ota = types.SimpleNamespace(authorized=lambda token: token == b'private-test-key')
+        self.server.ota_command = lambda action: calls.append(action) or True
+        self.server.ota_status = lambda: dict(current_version='v1',update_status='idle')
+        def request(extra=b'', method=b'POST'):
+            return self.server._response(method+b' /ota/check HTTP/1.1\r\nHost: pico\r\n'+extra+b'\r\n')
+        self.assertIn(b'403',request())
+        self.assertEqual(calls,[])
+        auth=b'X-OTA-Key: private-test-key\r\n'
+        self.assertIn(b'405',request(auth,b'GET'))
+        self.assertIn(b'403',request(auth+b'Origin: http://evil\r\n'))
+        self.assertIn(b'400',request(auth+b'Content-Length: 1\r\n'))
+        self.assertEqual(calls,[])
+        self.assertIn(b'200',request(auth+b'Origin: http://pico\r\n'))
+        self.assertEqual(calls,['check'])
+        self.server.ota_command=lambda _:False
+        self.assertIn(b'409',request(auth))
+        self.assertIn(b'200',self.request('/ota/status')[0])
 
     def test_reject_mutation_unknown_and_malformed(self):
         self.assertIn(b'405', self.request('/status', 'POST')[0])

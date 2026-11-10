@@ -169,6 +169,7 @@ throw_started = None
 
 last_event = "SYSTEM READY"
 last_cap = None
+cap_baseline = None  # Diagnostic idle estimate only; never used for scoring.
 last_contact = False
 
 now = time.ticks_ms()
@@ -621,6 +622,16 @@ def web_status():
     }
 
 
+def sensor_status():
+    return {
+        "raw": last_cap, "baseline": cap_baseline,
+        "delta": None if last_cap is None or cap_baseline is None else last_cap - cap_baseline,
+        "grab_threshold": GRAB_THRESHOLD, "release_threshold": RELEASE_THRESHOLD,
+        "grabbed": state == HELD or (state == COMPLETE and completed_held),
+        "hook_contact": last_contact,
+    }
+
+
 def web_action(action):
     global history, throws, hits, misses, last_completed
     if action == 'reset':
@@ -641,10 +652,101 @@ def web_action(action):
     return True
 
 
+ota_bench = False
+
+def ota_safe():
+    return (state in (READY, WAIT_RELEASE, COMPLETE) and (not history or len(history) == GAME_SHOTS)
+            and not last_contact and not hooked and not completed_held
+            and ((last_cap is not None and last_cap <= RELEASE_THRESHOLD)
+                 or (ota_bench and last_cap is None and not history)))
+
+
+def ota_checkpoint():
+    from ota_recovery import atomic_json
+    records.pending = True
+    records.flush(time.ticks_ms())
+    if records.pending or records.error:
+        raise OSError('Records checkpoint failed')
+    atomic_json('ota_game.json', {
+        'history': history, 'throws': throws, 'hits': hits, 'misses': misses,
+        'last_completed': last_completed, 'previous_completed': previous_completed,
+        'record_base': records.base, 'record_values': records.values,
+    })
+
+
+updater = None
+try:
+    from ota_recovery import load_state, confirm, atomic_json, STATE
+    ota_boot = load_state()
+    # A saved result remains available across activation and rollback. Ordinary
+    # power cycles keep the original RAM-only game behavior after confirmation.
+    if ota_boot.get('restore_pending'):
+        import json
+        with open('ota_game.json') as source:
+            restored = json.load(source)
+        history = restored['history']
+        throws, hits, misses = restored['throws'], restored['hits'], restored['misses']
+        last_completed, previous_completed = restored['last_completed'], restored['previous_completed']
+        records.base = tuple(restored['record_base'])
+        records.values = tuple(restored['record_values'])
+        state = COMPLETE if len(history) == GAME_SHOTS else WAIT_RELEASE
+        ota_boot['restore_pending'] = False
+        atomic_json(STATE, ota_boot)
+    with open('ota_config.json') as source:
+        ota_config = __import__('json').load(source)
+    ota_bench = ota_config.get('bench_mode') is True
+    from ota_client import Updater
+    import machine
+    updater = Updater(ota_config, ota_checkpoint, machine.reset)
+except (ImportError, OSError, ValueError, KeyError, TypeError) as exc:
+    print('OTA unavailable:', exc)
+
+ota_trial_start = time.ticks_ms()
+ota_iterations = 0
+
+
+ota_log_paused = False
+
+
+def pause_ota_log():
+    global log, log_buf, ota_log_paused
+    if log is not None:
+        if log_buf:
+            log.write('\n'.join(log_buf) + '\n')
+            log_buf = []
+        log.flush()
+        log.close()
+        log = None
+        ota_log_paused = True
+
+
+def ota_command(action):
+    if updater is None or not ota_safe():
+        return False
+    try:
+        # LittleFS statvfs can count an open append file twice. Close only while
+        # staging between games, preserving the log and resuming it afterwards.
+        pause_ota_log()
+        return updater.command(action, True)
+    except OSError as exc:
+        updater.error = 'Log checkpoint failed: ' + str(exc)
+        return False
+
+
+def ota_status():
+    if updater:
+        data = updater.status()
+        data['bench_mode'] = ota_bench
+        return data
+    return {'update_status': 'disabled', 'current_version': 'USB / unversioned',
+                                           'available_version': None}
+
+
 web = None
 try:
     from web_server import WebServer
-    web = WebServer(web_status, action=web_action)
+    web = WebServer(web_status, action=web_action, diagnostics=sensor_status,
+                    ota=updater, ota_command=ota_command, ota_status=ota_status)
 except Exception as exc:
     print("Web UI unavailable:", exc)
 
@@ -697,6 +799,12 @@ while True:
     if not contact and not hooked:
         cap = read_touch()
     last_cap = cap
+    if cap is not None or contact or hooked:
+        ota_bench = False
+    # Observe only released, ungrounded samples; do not alter sensor thresholds.
+    if (state in (READY, WAIT_RELEASE, WAIT_RESET) and not contact and not hooked
+            and cap is not None and cap <= RELEASE_THRESHOLD):
+        cap_baseline = cap if cap_baseline is None else cap_baseline + (cap - cap_baseline) / 16
 
     # Game logic
     if state == READY:
@@ -897,5 +1005,32 @@ while True:
 
     if state in (COMPLETE, WAIT_RELEASE):
         records.flush(time.ticks_ms())
+
+    if updater is not None:
+        if ota_config.get('bench_mode') and not ota_bench and ota_safe():
+            # Persist automatic bench exit once, between games; retry failures safely.
+            try:
+                updated_config = dict(ota_config)
+                updated_config['bench_mode'] = False
+                atomic_json('ota_config.json', updated_config)
+                ota_config = updated_config
+            except OSError:
+                updater.error = 'Could not persist bench-mode exit'
+        updater.poll(ota_safe())
+        if ota_log_paused and updater.phase in ('idle', 'available', 'error', 'paused'):
+            try:
+                log = open(LOG_FILE, 'a')
+            except OSError:
+                log = None
+            ota_log_paused = False
+    # Confirmation depends on real sensor-loop progress, never on Wi-Fi availability.
+    if 'ota_watchdog' in globals():
+        ota_iterations += 1
+        if ota_iterations >= 30 and time.ticks_diff(time.ticks_ms(), ota_trial_start) >= 30000 and ota_safe():
+            if ota_boot['phase'] == 'trial':
+                ota_boot = confirm()
+                if updater is not None:
+                    updater.boot = ota_boot
+        ota_watchdog.feed()
 
     time.sleep_ms(SAMPLE_INTERVAL_MS)

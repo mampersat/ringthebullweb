@@ -8,26 +8,44 @@ import time
 PAGE = b'''<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Ring the Bull</title><style>
-*{box-sizing:border-box}body{font:16px system-ui;background:#111820;color:#f6f8fb;max-width:28rem;margin:auto;padding:14px}
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}h1{font-size:1rem;margin:0}#connection{font-size:.75rem;color:#aab9c8;max-width:65%;text-align:right}
-#history{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}.shot{height:34px;display:grid;place-items:center;border-radius:5px;font-size:.8rem;font-weight:650;background:#36414d;color:#e1e7ee}
-.shot.hit{background:#187343;color:#fff}.shot.miss{background:#a83640;color:#fff}.shot.flying{outline:2px solid #79c6ff;outline-offset:-2px}
-#scores{background:#1b2936;border:1px solid #304151;border-radius:12px;padding:14px;margin-top:12px}.counts{display:flex;align-items:center;justify-content:space-between;gap:16px}.remaining{font-size:.85rem;color:#bdcbd8}#left{display:block;font-size:3rem;line-height:1.05;color:#fff;font-weight:750}
-.totals{display:flex;gap:18px;text-align:center}.totals strong{display:block;font-size:1.9rem;line-height:1.2}#hits{color:#73dfa4}#misses{color:#ff929a}.totals span{font-size:.8rem;color:#bdcbd8}
-#action{font-size:1.1rem;font-weight:650;margin:12px 0 2px}#state{font-size:.7rem;color:#aab9c8;letter-spacing:.06em}.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));text-align:center;gap:6px;margin:14px 0}.metrics strong{display:block;font-size:1.3rem}.metrics span{font-size:.72rem;color:#aab9c8}.metrics small{font-size:.75rem;color:#aab9c8}
-.controls{display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:8px}button{font:600 .9rem system-ui;min-height:44px;border:1px solid #415364;border-radius:8px;background:#26394b;color:#fff;padding:8px 4px}button:disabled{opacity:.4}#share{background:#225939;border-color:#36784e}
-#recordsError,#message{color:#f5bb7b;font-size:.8rem;margin:8px 0}#recordsError:empty,#message:empty{display:none}footer{text-align:center;border-top:1px solid #2c3946;margin-top:18px;padding-top:14px}footer p{font-size:.8rem;color:#aab9c8;margin:0 0 10px}canvas{display:block;margin:auto;max-width:100%;height:auto;image-rendering:pixelated}#pageUrl{display:block;color:#bdcbd8;font-size:.75rem;margin-top:8px;overflow-wrap:anywhere}
-</style><header><h1>Ring the Bull</h1><span id="connection" role="status">Connecting...</span></header>
-<div id="history" aria-label="21 throws"></div>
-<section id="scores" aria-label="Current game"><div class="counts">
-<div class="remaining"><strong id="left">21</strong>shots left</div>
-<div class="totals"><div><strong id="hits">0</strong><span>hits</span></div><div><strong id="misses">0</strong><span>misses</span></div></div></div>
-<p id="action">Waiting for scoreboard</p><span id="state">CONNECTING</span><span id="throws" hidden>0</span></section>
-<div class="metrics"><div><strong><b id="best">0</b><small>/21</small></strong><span>High score</span></div>
-<div><strong id="longest_streak">0</strong><span>Best streak</span></div><div><strong id="rate">0.0%</strong><span>Accuracy</span></div></div>
+:root{color-scheme:dark;--wood:#2b1d17;--screen:#121510;--brass:#b7934b;--cream:#f3e7c6;--green:#79b886;--red:#ce7969}
+*{box-sizing:border-box}body{margin:0;background:#1a120e;color:var(--cream);font:16px Georgia,'Times New Roman',serif;padding:12px}main{max-width:740px;margin:auto;background:var(--wood);border:2px solid #684a2f;box-shadow:0 0 0 3px #110e0b,inset 0 0 0 3px #35281c;padding:12px}
+header{text-align:center;border:3px double var(--brass);padding:8px 6px;margin-bottom:10px}h1{margin:0;font-size:clamp(1.7rem,7vw,3.2rem);letter-spacing:.04em;line-height:1;text-shadow:2px 2px #080a07}
+.playfield{background:var(--screen);border:1px solid #8e733f;box-shadow:inset 0 0 0 4px #080a07;padding:10px}.statusline{display:flex;justify-content:space-between;gap:10px;font:12px 'Courier New',monospace;color:#c4b792}.statusline span:last-child{text-align:right}#connection{color:var(--green)}
+#scores{margin-top:8px}.counts{display:grid;grid-template-columns:1fr 1fr;align-items:end;gap:8px}.live-score{border-right:1px solid #4d482f}.score-label{display:block;font-size:.9rem;color:#c4b792}#hits{display:block;font:900 clamp(4.5rem,20vw,8.5rem)/.95 'Courier New',monospace;letter-spacing:-.09em;color:var(--cream);text-shadow:2px 2px #5e4f2c}
+.shot-count{text-align:right;padding-bottom:3px}.shot-count strong{font:700 clamp(2rem,9vw,3rem)/1 'Courier New',monospace}.shot-count small{font:1rem 'Courier New',monospace;color:#aa9f7d}.results{display:flex;justify-content:space-between;gap:8px;margin-top:8px;font:14px 'Courier New',monospace;color:#c4b792}.results b{color:var(--cream)}#misses{color:var(--red)}
+#action{margin:8px 0 0;padding:6px 0;border-top:1px solid #4d482f;font-size:1.2rem;line-height:1.2;font-weight:bold;color:var(--green)}#state{display:block;color:#a89d7d;font:11px 'Courier New',monospace;letter-spacing:.04em;margin-bottom:6px}
+#history{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}.shot{display:grid;place-items:center;min-width:0;height:26px;background:#252920;border:1px solid #494e3e;color:#b4b6a3;font:700 13px 'Courier New',monospace;box-shadow:inset 0 -3px #161a14}.shot.hit{background:#285439;border-color:var(--green);color:#edffe5}.shot.miss{background:#622d24;border-color:var(--red);color:#ffe6d5}.shot.flying{outline:2px solid var(--cream);outline-offset:-3px}
+.records{margin-top:12px}.records h2{display:flex;justify-content:space-between;align-items:baseline;font-size:1.2rem;color:var(--brass);margin:0 0 6px}.records h2 small{font-size:.75rem;font-weight:normal;color:#c7b28a}table{width:100%;border-collapse:collapse;font:14px 'Courier New',monospace}th,td{padding:6px 0;border-bottom:1px solid #5c452e}th{text-align:left;font-weight:normal}td{text-align:right;color:var(--cream);font-weight:bold;font-size:1.1rem}#weekly{font:12px/1.35 'Courier New',monospace;color:#c7b28a;margin:8px 0 0}
+.controls{display:grid;grid-template-columns:1fr 1.3fr 1.2fr;gap:7px;margin-top:12px}button{min-height:44px;border:1px solid #d2ae62;border-bottom:4px solid #745624;border-radius:2px;background:#b7934b;color:#17130d;font:700 14px Georgia,'Times New Roman',serif;padding:8px 3px}button:active{transform:translateY(2px);border-bottom-width:2px}button:disabled{background:#3c3223;border-color:#6d5838;color:#a99977;transform:none}button:focus-visible,a:focus-visible{outline:3px solid var(--cream);outline-offset:3px}
+#recordsError,#message{font:13px/1.4 'Courier New',monospace;color:#f3b49d;margin:10px 0}#recordsError:empty,#message:empty{display:none}footer{border-top:3px double #8e733f;text-align:center;margin-top:16px;padding-top:12px}footer p{font-size:.85rem;color:#c7b28a;margin:0 0 10px}canvas{display:block;margin:auto;max-width:100%;height:auto;image-rendering:pixelated}#pageUrl{display:block;color:var(--brass);font:12px 'Courier New',monospace;overflow-wrap:anywhere;margin-top:8px}
+@media(min-width:650px){body{padding:28px}main{padding:22px}header{padding:18px}.playfield{padding:20px}.counts{grid-template-columns:1.2fr 1fr}#hits{font-size:10rem}.shot-count strong{font-size:4rem}#action{font-size:1.6rem}.shot{height:38px;font-size:16px}.statusline,.results{font-size:16px}.records h2{font-size:1.5rem}table{font-size:16px}.lower{display:grid;grid-template-columns:1fr 190px;gap:28px;align-items:start}.controls{margin-top:16px}footer{margin-top:16px;padding-top:12px}footer canvas{max-width:150px}button{font-size:16px}}
+@media(max-width:350px){body{padding:7px}main{padding:7px}header{padding:8px 6px}#hits{font-size:4.5rem}#history{gap:4px}.shot{height:24px}#action{margin-top:8px;padding:6px 0}#state{margin-bottom:6px}.playfield{padding:10px}.records{margin-top:9px}.records h2{font-size:1.1rem}th,td{padding:4px 0}#weekly{font-size:11px}.controls{margin-top:9px}.results{font-size:12px}#action{font-size:1.05rem}}
+#debugPanel{margin-top:14px;border-top:1px solid var(--brass);padding-top:10px}#debugToggle{margin-top:12px;width:100%}#debugValues{font:13px/1.6 'Courier New',monospace}#sensorGraph{width:100%;height:180px;background:var(--screen);image-rendering:auto}#debugPanel[hidden]{display:none}#debugNote{font:12px/1.4 'Courier New',monospace;color:#c7b28a}
+</style><main><header><h1>Ring the Bull</h1></header>
+<div class="playfield"><div class="statusline"><span>21-shot game</span><span id="connection" role="status">Connecting...</span></div>
+<section id="scores" aria-label="Current game"><div class="counts"><div class="live-score"><span class="score-label">Score</span><strong id="hits">0</strong></div>
+<div class="shot-count"><span class="score-label">Shots taken</span><strong id="throws">0</strong><small> / 21</small></div></div>
+<div class="results"><span><b id="left">21</b> shots left</span><span>Misses <b id="misses">0</b></span></div>
+<p id="action">Waiting for scoreboard</p><span id="state">CONNECTING</span></section>
+<div id="history" aria-label="21 throws"></div></div>
+<div class="lower"><div><section class="records" aria-label="High scores"><h2>House records <small>All time</small></h2>
+<table aria-label="All-time high scores"><tbody><tr><th scope="row">High score</th><td><span id="best">0</span> / 21</td></tr>
+<tr><th scope="row">Best hit streak</th><td id="longest_streak">0</td></tr>
+<tr><th scope="row">Game accuracy</th><td id="rate">0.0%</td></tr></tbody></table>
+<p id="weekly">Weekly scores need a synced clock.</p></section>
 <div class="controls"><button id="undo" disabled>Undo</button><button id="reset">Start Over</button><button id="share" disabled>Share</button></div>
-<p id="recordsError" role="status"></p><p id="message" role="status"></p>
-<footer><p>Scan to open this scoreboard</p><canvas id="qr" role="img" aria-label="QR code for this scoreboard"></canvas><a id="pageUrl"></a></footer>
+<p id="recordsError" role="status"></p><p id="message" role="status"></p></div>
+<footer><p>Scan to join the game</p><canvas id="qr" role="img" aria-label="QR code for this scoreboard"></canvas><a id="pageUrl"></a></footer></div>
+<button id="debugToggle" aria-expanded="false" aria-controls="debugPanel">Enter Debug</button>
+<section id="debugPanel" hidden aria-label="Sensor diagnostics"><h2>Sensor diagnostics</h2>
+<div id="debugValues">Waiting for sensor readings...</div>
+<canvas id="sensorGraph" width="640" height="180" role="img" aria-label="Last 60 seconds: raw capacitance, idle baseline and grab threshold"></canvas>
+<p id="debugNote">Raw: cream / idle baseline: green / grab threshold: gold. Readings in microseconds, not farads. Baseline is an observed idle estimate, not scoring calibration. Gaps mean timeout or sensing skipped on hook.</p></section>
+<details id="updates"><summary>Application updates</summary>
+<p id="updateInfo">Loading version...</p><button id="updateCheck">Check for update</button>
+<button id="updateInstall" disabled>Install between games</button>
+<p>Trusted LAN only. Updates briefly restart the Pico. Your saved results are retained.</p></details></main>
 <script>
 const slots=[];
 for(let i=0;i<21;i++){const slot=document.createElement('span');slot.className='shot';slot.textContent=i+1;
@@ -93,6 +111,85 @@ document.getElementById('share').onclick=async()=>{
  if(copied)document.getElementById('message').textContent='Results copied';
  else prompt('Copy results:',text);
 };
+// The update key stays only in memory; never in URLs or browser storage.
+let updateKey=null;
+async function updateInfo(){
+ try{const response=await fetch('/ota/status',{cache:'no-store'});if(!response.ok)return;
+  const s=await response.json();
+  document.getElementById('updateInfo').textContent='Installed: '+s.current_version+
+   ' | Available: '+(s.available_version||'unchecked')+' | '+s.update_status+(s.trial?' (trial)':'')+
+   (s.bench_mode?' | BENCH: sensors disconnected':'')+
+   (s.update_error?' | '+s.update_error:'');
+  document.getElementById('updateInstall').disabled=!['available','paused','error'].includes(s.update_status)||!s.available_version;
+ }catch(e){document.getElementById('updateInfo').textContent='Update status unavailable';}
+}
+async function updateCommand(name){
+ if(!updateKey)updateKey=prompt('Private OTA key (trusted LAN only):');if(!updateKey)return;
+ if(name==='install'&&!confirm('Install this release and restart between games?'))return;
+ try{const response=await fetch('/ota/'+name,{method:'POST',headers:{'X-OTA-Key':updateKey}});
+  if(!response.ok){if(response.status===403)updateKey=null;throw Error(response.status===409?'Game active or updater busy':'Update request rejected');}
+  await updateInfo();
+ }catch(e){document.getElementById('updateInfo').textContent=e.message;}
+}
+document.getElementById('updateCheck').onclick=()=>updateCommand('check');
+document.getElementById('updateInstall').onclick=()=>updateCommand('install');
+async function refreshUpdateInfo(){if(!document.hidden)await updateInfo();setTimeout(refreshUpdateInfo,2000);}
+refreshUpdateInfo();
+// Diagnostics: one request in flight, 5 Hz maximum, 300 browser-only samples.
+let debugOpen=false, debugTimer=null, debugRequest=null, debugGeneration=0;
+const debugSamples=[];
+function drawSensorGraph(){
+ const canvas=document.getElementById('sensorGraph'),ctx=canvas.getContext('2d');
+ const w=canvas.width,h=canvas.height,now=performance.now();
+ while(debugSamples.length&&now-debugSamples[0].t>60000)debugSamples.shift();
+ ctx.clearRect(0,0,w,h);
+ let maximum=600;
+ for(const s of debugSamples)for(const key of ['raw','baseline','grab_threshold'])
+  if(Number.isFinite(s[key]))maximum=Math.max(maximum,s[key]*1.1);
+ ctx.font='12px monospace';ctx.fillStyle='#c7b28a';
+ ctx.fillText(Math.ceil(maximum)+' us',4,13);ctx.fillText('-60s',4,h-3);ctx.fillText('now',w-28,h-3);
+ for(const [key,color] of [['raw','#f3e7c6'],['baseline','#79b886'],['grab_threshold','#b7934b']]){
+  ctx.strokeStyle=color;ctx.beginPath();let pen=false,lastTime=null;
+  for(const s of debugSamples){
+   if(!Number.isFinite(s[key])){pen=false;continue;}
+   const x=w-(now-s.t)/60000*w,y=h-18-s[key]/maximum*(h-36);
+   if(pen&&s.t-lastTime<1000)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+   pen=true;lastTime=s.t;
+  }ctx.stroke();
+ }
+}
+function stopDebug(){
+ debugGeneration++;clearTimeout(debugTimer);debugTimer=null;
+ if(debugRequest)debugRequest.abort();
+}
+async function pollDebug(){
+ if(!debugOpen||document.hidden||debugRequest)return;
+ const generation=debugGeneration,controller=new AbortController();debugRequest=controller;
+ const timeout=setTimeout(()=>controller.abort(),1500),started=performance.now();
+ try{
+  const response=await fetch('/debug',{cache:'no-store',signal:controller.signal});
+  if(!response.ok)throw Error('debug');const s=await response.json();
+  if(generation!==debugGeneration||!debugOpen||document.hidden)return;
+  const value=n=>Number.isFinite(n)?Math.round(n*10)/10+' us':'unavailable';
+  document.getElementById('debugValues').textContent='Raw: '+value(s.raw)+' | Baseline (idle): '+value(s.baseline)+
+   ' | Delta: '+value(s.delta)+' | Grab threshold: '+value(s.grab_threshold)+
+   ' | Grabbed: '+(s.grabbed?'yes':'no')+' | Hook contact (electrical): '+(s.hook_contact?'yes':'no');
+  debugSamples.push({...s,t:performance.now()});if(debugSamples.length>300)debugSamples.shift();drawSensorGraph();
+ }catch(e){if(generation===debugGeneration&&debugOpen&&!document.hidden)
+  document.getElementById('debugValues').textContent='Sensor diagnostics unavailable - retrying';}
+ finally{
+  clearTimeout(timeout);debugRequest=null;
+  if(debugOpen&&!document.hidden)debugTimer=setTimeout(pollDebug,Math.max(0,200-(performance.now()-started)));
+ }
+}
+document.getElementById('debugToggle').onclick=()=>{
+ debugOpen=!debugOpen;stopDebug();
+ document.getElementById('debugPanel').hidden=!debugOpen;
+ document.getElementById('debugToggle').textContent=debugOpen?'Exit Debug':'Enter Debug';
+ document.getElementById('debugToggle').setAttribute('aria-expanded',String(debugOpen));
+ if(debugOpen)pollDebug();
+};
+document.addEventListener('visibilitychange',()=>{stopDebug();if(!document.hidden&&debugOpen)pollDebug();});
 // Compact byte-mode QR encoder: versions 1-10, level L, mask 0.
 // All work runs once in the browser; nothing is generated or stored on the Pico.
 function drawQR(url){
@@ -177,8 +274,10 @@ class WebServer:
     CLIENT_TIMEOUT_MS = 5000
     RETRY_MS = 30000
 
-    def __init__(self, status, port=80, action=None):
+    def __init__(self, status, port=80, action=None, diagnostics=None, ota=None, ota_command=None, ota_status=None):
         self.status = status
+        self.diagnostics = diagnostics
+        self.ota, self.ota_command, self.ota_status = ota, ota_command, ota_status
         self.action = action
         self.port = port
         self.listener = None
@@ -239,6 +338,27 @@ class WebServer:
         code, kind = '200 OK', 'text/plain; charset=utf-8'
         if len(line) != 3 or line[2] not in (b'HTTP/1.0', b'HTTP/1.1'):
             code, body = '400 Bad Request', b'Bad request\n'
+        elif line[1] in (b'/ota/check', b'/ota/install'):
+            if line[0] != b'POST':
+                code, body = '405 Method Not Allowed', b'Use POST\n'
+            else:
+                fields = {}
+                for row in request.split(b'\r\n')[1:]:
+                    if b':' in row:
+                        key, value = row.split(b':', 1)
+                        fields[key.lower()] = value.strip()
+                origin = fields.get(b'origin')
+                token = fields.get(b'x-ota-key', b'')
+                if self.ota is None or not self.ota.authorized(token):
+                    code, body = '403 Forbidden', b'Update authentication required\n'
+                elif origin is not None and origin != b'http://' + fields.get(b'host', b''):
+                    code, body = '403 Forbidden', b'Origin mismatch\n'
+                elif fields.get(b'content-length', b'0') != b'0' or b'transfer-encoding' in fields:
+                    code, body = '400 Bad Request', b'Empty body required\n'
+                elif self.ota_command is None or not self.ota_command(line[1].split(b'/')[-1].decode()):
+                    code, body = '409 Conflict', b'Update unavailable or game active\n'
+                else:
+                    kind, body = 'application/json', json.dumps(self.ota_status()).encode()
         elif line[1] in (b'/undo', b'/reset'):
             if line[0] != b'POST':
                 code, body = '405 Method Not Allowed', b'Use POST\n'
@@ -265,15 +385,19 @@ class WebServer:
             data = self.status()
             data['uptime'] = self.uptime_ms // 1000
             kind, body = 'application/json', json.dumps(data).encode()
+        elif line[1] == b'/debug' and self.diagnostics is not None:
+            kind, body = 'application/json', json.dumps(self.diagnostics()).encode()
+        elif line[1] == b'/ota/status' and self.ota_status is not None:
+            kind, body = 'application/json', json.dumps(self.ota_status()).encode()
         elif line[1] == b'/health':
             body = b'ok\n'
         else:
             code, body = '404 Not Found', b'Not found\n'
-        allow = 'POST' if len(line) == 3 and line[1] in (b'/undo', b'/reset') else 'GET'
+        allow = 'POST' if len(line) == 3 and line[1] in (b'/undo', b'/reset', b'/ota/check', b'/ota/install') else 'GET'
         header = ('HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n'
                   'Cache-Control: no-store\r\nConnection: close\r\n'
                   'Allow: {}\r\n\r\n').format(code, kind, len(body), allow).encode()
-        return header + body
+        return (header, body) if body is PAGE else header + body
 
     def _service(self, sock, flags, now):
         if flags & (select.POLLERR | select.POLLHUP):
@@ -313,14 +437,23 @@ class WebServer:
                 self.poller.modify(sock, select.POLLOUT)
         elif flags & select.POLLOUT and client[2] is not None:
             start = client[3]
-            sent = sock.send(memoryview(client[2])[start:start + self.CHUNK])
+            response = client[2]
+            if isinstance(response, tuple):
+                header, body = response
+                total = len(header) + len(body)
+                part = (memoryview(header)[start:start + self.CHUNK] if start < len(header)
+                        else memoryview(body)[start - len(header):start - len(header) + self.CHUNK])
+            else:
+                total = len(response)
+                part = memoryview(response)[start:start + self.CHUNK]
+            sent = sock.send(part)
             if sent is None:
                 return
             if sent <= 0:
                 self._close(sock)
                 return
             client[3] += sent
-            if client[3] == len(client[2]):
+            if client[3] == total:
                 self._close(sock)
 
     def poll(self):

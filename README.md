@@ -124,6 +124,10 @@ The firmware uses **500 µs grab / 300 µs release** thresholds with debounce. F
    WIFI_PASSWORD = "your-password"
    ```
 
+**USB-only installations:** the commands below install the game directly. If OTA
+is already installed, use its release tools instead: copying application `main.py`
+to root would overwrite the recovery launcher.
+
 Deploy from the repository root using [mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html):
 
 ```sh
@@ -152,9 +156,26 @@ Connect the phone to the same network and open **http://ringthebull.local/**. Fi
 
 If your client or network does not support mDNS, use the DHCP IP instead. The serial console prints `Scoreboard: http://<DHCP-IP>/` when the listener starts; your router's DHCP leases also show the address. Scan the QR to bring another phone to the same local page. After changing the hostname, use a hard reset/power cycle so it applies on a fresh connection (`ampy --port /dev/ttyACM0 reset --hard`).
 
-The self-contained page is about **12 KB**. It polls `/status` **500 ms after each request finishes**. The QR is generated once in the browser from `location.origin`; sharing uses that same origin, so neither depends on a hardcoded device address.
+The self-contained page is about **21 KB**. It polls `/status` **500 ms after each request finishes**. The QR is generated once in the browser from `location.origin`; sharing uses that same origin, so neither depends on a hardcoded device address.
 
 Networking uses `select.poll(0)`, nonblocking sockets, two client slots, bounded 512-byte reads/writes, and a five-second client timeout. Connection loss closes clients; the listener restarts after reconnection. Network initialization failures leave scoring running offline. There is no Wi-Fi setup portal or cloud relay.
+
+### Live sensor diagnostics
+
+Use **Enter Debug / Exit Debug** below the scoreboard. Debug shows raw RC charge
+time, an observed idle baseline, delta, the fixed grab threshold, confirmed grabbed
+state, and raw electrical hook contact. The canvas plots raw, baseline and threshold
+for the last 60 seconds. All readings are in microseconds, not farads.
+
+The browser requests `/debug` at up to 5 Hz, with one request in flight, and stops
+when debug closes or the page is hidden. Its graph holds at most 300 samples;
+the Pico stores no graph history and performs no extra sensor reads or flash writes.
+The baseline is a diagnostic-only smoothed estimate from existing released samples
+at/below the release threshold while READY, WAIT RELEASE or WAIT RESET. It starts
+unknown, survives game resets in RAM, and never changes fixed scoring thresholds.
+Raw/delta are `null` on timeout or when capacitance sensing is skipped on the hook;
+the graph leaves gaps. Grabbed reflects confirmed HELD state (including a completed
+game's held re-catch), not a single threshold crossing.
 
 ### Calibrate and troubleshoot
 
@@ -166,6 +187,113 @@ Open an ANSI-capable USB serial terminal (`mpremote connect`, `screen`, or minic
 - **Capacitance diagnostic:** `diag_capacitance.py` visualizes/logs readings, but its 60/45 µs thresholds and bar scale are older than the game's current calibration.
 - **Logging is currently enabled** (`LOG_ENABLED = True`). Pull `game_log.csv` with `mpremote cp :game_log.csv .`; disable logging for normal use if you don't need it. The logger stops below 150 KB free flash.
 
+## Application OTA updates
+
+**Bench verified 2026-11-09:** `2026.11.09.4` installed over Wi-Fi, rebooted and
+confirmed; an authenticated deliberately stalled trial triggered the real hardware
+watchdog and automatically rolled back to the confirmed release. High score 15,
+best streak 7, and game results survived. All original device files were downloaded
+and hash-verified under private `device_backups/ring-1794278043/`; only the archived
+119 KB `readings.csv` diagnostic capture was removed with explicit approval.
+Sensors were disconnected: physical throw sensing, LED output and physical
+brownouts remain rig tests. Desktop tests cover interrupted downloads/pointer writes,
+corruption, authentication, rollback, offline confirmation and scoring gates.
+
+OTA is a local-LAN application updater, not a MicroPython firmware updater. The
+repo is the release source; the Pico downloads signed, immutable releases from a
+small server on your computer. Internet and that server are never required to
+boot, sense the ring, or score. Existing USB-only installations continue working.
+
+One-time setup (existing `ampy`, no new tools):
+
+```sh
+# Use this computer's actual LAN IPv4 address; reserve it in DHCP.
+python3 tools/ota_release.py init --host 192.168.1.145
+python3 tools/ota_release.py build --version 2026.11.09.1
+python3 tools/ota_release.py serve
+# In a separate terminal, with the ring released and no unfinished game:
+python3 tools/ota_install.py --version 2026.11.09.bootstrap
+# Add --bench ONLY for an explicitly disconnected-sensor bench board.
+```
+
+The installer is intentionally pinned to the verified Ring the Bull USB identity
+`e66428c51fa06e28`; it refuses other boards and active/unconfirmed sensor states.
+The optional `--bench` allowance accepts unavailable sensors only with an empty
+game; it is displayed in update status and automatically disabled when valid
+sensing appears (persisted at the next safe interval). Held/in-flight/unfinished
+games remain blocked. It preserves the RAM game result before replacing the root entrypoint, backs up
+deployed files to a private `/tmp/ring-ota-bootstrap-*` directory, verifies uploads,
+and resets. Those host backups are temporary: copy them somewhere durable.
+Do not run it against an already initialized OTA installation.
+
+Open **Application updates** on the Pico page. Check/Install asks for the private
+`key` from local gitignored `ota_config.json`; it is sent in a header and kept only
+in page memory. Never publish that file or place it inside `releases/`. The same
+per-device key authenticates the release manifest with HMAC-SHA-256. Plain HTTP
+provides no confidentiality: use only a trusted LAN, never port-forward this API,
+and keep the publisher directory separate from credentials. The Python release
+server runs in the foreground until stopped; it is not installed as a service.
+
+For subsequent deployments, change the application, run tests, build a **new**
+version with `tools/ota_release.py build --version VERSION`, and use Check/Install.
+Keep the server running on the configured IPv4/port (default 8765). Build reads the
+current checkout, including uncommitted changes; a version is a named snapshot,
+not proof that the files were committed. Existing version directories are immutable.
+No Git client, GitHub API, DNS, HTTPS, or third-party updater runs on the Pico.
+
+The allowed release set is only `main.py`, `web_server.py`, and `records.py`.
+Manifest format 1 wraps an exact JSON `payload` string and its hexadecimal `hmac`;
+payload contains `format`, `version`, and `files` (`name`, `size`, `sha256`). The
+client rejects unexpected paths, oversized files/manifests, and encoded responses.
+Downloads use numeric IPv4, nonblocking sockets, poll(0), and at most one 512-byte
+network read/write per game-loop pass. Files stream to the inactive slot, are
+hashed as written, closed/synced, re-read and hashed from flash in bounded chunks,
+then activated together by a LittleFS atomic
+pointer replacement. Restarted/interrupted transfers begin at byte zero; this
+version does not use HTTP Range/resume offsets. Bad or partial slots never boot.
+
+Checks, staging and activation require an empty or completed game and a confirmed
+released ring. A grab, hook contact, timeout/unavailable sample, or unfinished game
+pauses staging; Check/Install can be retried when safe. Activation briefly restarts
+the Pico, so sensing is unavailable during that restart. Flash operations can add
+latency even though sockets never block. They run only between games.
+
+`ota/launcher.py` is installed once as root `/main.py`. Root `ota_recovery.py` and
+`ota_client.py`, private configuration, `records.json`, logs, and OTA metadata stay
+outside slots `ota_a/` and `ota_b/`; ordinary releases cannot overwrite them. Game
+results and the record baseline are checkpointed before activation and restored
+on a trial or rollback, including the last shareable result and undo context.
+This is an update checkpoint, not continuous persistence of every throw.
+
+Before executing a candidate, recovery persists an unconfirmed trial marker. A
+restart/power loss before confirmation selects the previous slot. Exceptions
+reset immediately; an 8-second hardware watchdog recovers a stalled loop. After
+30 seconds and at least 30 completed loop passes, confirmation waits for a safe
+released state; it does not require Wi-Fi. The watchdog remains enabled after
+confirmation. It affects serial maintenance: stopping the loop can reset the board.
+Recovery-module changes require USB maintenance, not an application release.
+`python3 tools/ota_maintenance.py enter` sets a USB-only maintenance marker and
+resets into REPL with the watchdog disabled. Use existing ampy there for repairs;
+`python3 tools/ota_maintenance.py exit` removes the marker and restarts the game.
+This deliberately suspends scoring: use only during supervised maintenance.
+
+An open append log can make LittleFS free-space reporting count shared blocks
+more than once. The updater flushes/closes logging between games while checking
+or staging, then resumes logging on completion/error/pause. Existing log data is
+never deleted automatically. If space is insufficient, archive/verify old captures
+before explicitly deciding what to remove. Never bypass the capacity check.
+
+For a controlled end-to-end check between games/on a bench, use
+`python3 tools/ota_verify.py --version VERSION`. It checks authentication, installs
+the served release, waits for trial confirmation, and compares records/results.
+
+Two copies need free flash; staging checks capacity with a margin. Atomic pointer
+safety assumes the standard Pico MicroPython LittleFS filesystem and working flash;
+a damaged filesystem or corrupted recovery code still needs USB recovery. Automated
+host failure injection cannot prove physical brownout behavior, RF reconnection,
+flash latency, or watchdog timing on every rig. Trial confirmation catches startup
+failures and loop stalls, not every possible scoring regression.
+
 ## API
 
 Plain HTTP on the Pico's local address. Responses are uncached. Mutations take an **empty POST body**; GET never changes the game.
@@ -174,6 +302,9 @@ Plain HTTP on the Pico's local address. Responses are uncached. Mutations take a
 |---|---|---|
 | GET | `/` | Mobile scoreboard and inline QR generator |
 | GET | `/status` | JSON snapshot of game state and records |
+| GET | `/debug` | Small read-only sensor snapshot: `raw`, `baseline`, `delta`, `grab_threshold`, `release_threshold`, `grabbed`, `hook_contact` |
+| GET | `/ota/status` | Installed/available version, update state/error/progress, trial flag |
+| POST | `/ota/check`, `/ota/install` | Empty body and `X-OTA-Key` required; `403` unauthorized, `409` busy/active game |
 | GET | `/health` | `200` with `ok` and a newline |
 | POST | `/undo` | Updated snapshot; `409` during flight or with no history |
 | POST | `/reset` | Updated snapshot; clears game, preserves records |

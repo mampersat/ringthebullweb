@@ -137,3 +137,34 @@ The S3 phone app remains separately deployed. Do not add network waits to the lo
 ## Known limitations
 
 Fixed thresholds (no auto-calibration); wire movement/nearby grounded objects shift readings; the 3 s timeout can score a miss while the ring still swings; current scores are RAM-only (records persist); single player; hook contact must last ≥300 ms to count; `PIXEL_COUNT` (100) exceeds the physical strip (~22).
+
+
+## OTA application boundary
+
+`ota/launcher.py` installs as root main.py; app main.py stays the game source in
+this repo and is released into ota_a/ota_b with web_server.py and records.py.
+Root ota_recovery.py and ota_client.py are USB-installed, excluded from releases.
+Never add credentials, settings, records, logs, recovery, or arbitrary paths to
+release manifests. Preserve current behavior when OTA files/config are absent.
+Updater work is cooperative at the loop bottom, gated by ota_safe(); any physical
+activity pauses it. No DNS or blocking network work. HMAC-authenticated manifests,
+SHA-256+size file validation, and authenticated POST commands are distinct checks.
+Trusted LAN HTTP is not encrypted. Release server must not serve ota_config.json.
+Trial confirmation is offline, loop-progress based, safe-state only; watchdog is
+fed only after a complete iteration. Fault injection lives in tests/test_ota.py.
+USB installer is pinned to ring board e66428c51fa06e28 (never the thermostat).
+Do not blindly overwrite root main.py with the application once OTA is installed.
+
+
+OTA commissioned 2026-11-09 on ring e66428c51fa06e28 (MicroPython 1.29.0).
+Current confirmed version 2026.11.09.4; root launcher/recovery/client installed,
+slots initialized. Authenticated Wi-Fi install/activation/trial confirmation and
+real watchdog-stall rollback were verified; known good manifest restored. Bench
+mode is explicit because sensors are disconnected; auto-exits on valid sensing.
+Do not mistake WAIT RELEASE + null raw on this bench for a broken upgrade.
+Original files are hash-verified in device_backups/ring-1794278043 (private/ignored).
+Only readings.csv was removed from Pico with user approval; records (15/7), game
+log and credentials preserved. Publisher runs on host 192.168.1.145:8765, started
+with tools/ota_release.py serve; not a persistent system service. Physical throws
+and real power-cut validation remain unverified. Host suite: 45 tests plus browser
+checks. Use tools/ota_maintenance.py for USB repair; never blindly upload root main.
