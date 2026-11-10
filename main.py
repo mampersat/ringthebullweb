@@ -167,6 +167,9 @@ unhook_candidate_since = None
 
 throw_started = None
 
+score_boot = __import__("binascii").hexlify(os.urandom(8)).decode()
+score_event = 0
+score_sound = None
 last_event = "SYSTEM READY"
 last_cap = None
 cap_baseline = None  # Diagnostic idle estimate only; never used for scoring.
@@ -615,6 +618,7 @@ def web_status():
         "hits": hits, "misses": misses, "throws": throws,
         "state": STATE_NAMES[state], "history": history,
         "hook": last_contact, "complete": len(history) == GAME_SHOTS,
+        "score_event": score_event, "score_sound": score_sound, "score_boot": score_boot,
         "last_completed": last_completed,
         "best": records.values[0], "longest_streak": records.values[1],
         "records_error": records.error,
@@ -654,9 +658,18 @@ def web_action(action):
 
 ota_bench = False
 
+def ota_idle():
+    # Staging may continue through unconfirmed capacitance spikes, but never
+    # through a confirmed grab, flight, contact, partial game, or sensor timeout.
+    return (state in (READY, WAIT_RELEASE, COMPLETE) and (not history or len(history) == GAME_SHOTS)
+            and not last_contact and not hooked and not completed_held
+            and (last_cap is not None or (ota_bench and not history)))
+
+
 def ota_safe():
     return (state in (READY, WAIT_RELEASE, COMPLETE) and (not history or len(history) == GAME_SHOTS)
             and not last_contact and not hooked and not completed_held
+            and touch_candidate_since is None
             and ((last_cap is not None and last_cap <= RELEASE_THRESHOLD)
                  or (ota_bench and last_cap is None and not history)))
 
@@ -926,6 +939,9 @@ while True:
             touch_candidate_since = None
 
     if len(history) != resolved_before:
+        if history and len(history) > resolved_before:
+            score_event += 1
+            score_sound = 'complete' if len(history) == GAME_SHOTS else ('hit' if history[-1] else 'miss')
         if len(history) == GAME_SHOTS:
             previous_completed = last_completed
             last_completed = {
@@ -1016,7 +1032,11 @@ while True:
                 ota_config = updated_config
             except OSError:
                 updater.error = 'Could not persist bench-mode exit'
-        updater.poll(ota_safe())
+        idle = ota_idle()
+        # Keep a verified release ready while a brief candidate clears. Actual
+        # play still pauses it; activation keeps the stricter released-ring gate.
+        if not idle or updater.phase != 'ready' or ota_safe():
+            updater.poll(idle)
         if ota_log_paused and updater.phase in ('idle', 'available', 'error', 'paused'):
             try:
                 log = open(LOG_FILE, 'a')

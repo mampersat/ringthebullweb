@@ -15,7 +15,9 @@ def main():
     parser.add_argument('--url',default='http://ringthebull.local')
     parser.add_argument('--config',type=Path,default=ROOT/'ota_config.json')
     parser.add_argument('--version',required=True)
+    parser.add_argument('--poll-interval',type=float,default=.5,help='Status interval; use 5 for a quiet transfer on the legacy sensing gate')
     args=parser.parse_args()
+    if not .2<=args.poll_interval<=10:parser.error('poll interval must be 0.2–10 seconds')
     key=json.loads(args.config.read_text())['key']
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def request(path,auth=False,post=False):
@@ -33,16 +35,18 @@ def main():
     else:raise AssertionError('Unauthenticated update accepted')
     print('PASS health and unauthenticated update rejection',flush=True)
     request('/ota/check',auth=True,post=True)
+    time.sleep(args.poll_interval)
     end=time.monotonic()+25
     while time.monotonic()<end:
         status=request('/ota/status')
-        if status['update_status']=='error':raise RuntimeError(status.get('update_error'))
+        if status['update_status'] in ('error','paused'):raise RuntimeError(status.get('update_error'))
         if status['update_status']=='available':break
-        time.sleep(.3)
+        time.sleep(args.poll_interval)
     else:raise RuntimeError('No release available')
     assert status['available_version']==args.version,status
     print('PASS authenticated manifest check:',args.version,flush=True)
     request('/ota/install',auth=True,post=True)
+    time.sleep(args.poll_interval)
     end=time.monotonic()+110
     last=None
     while time.monotonic()<end:
@@ -50,13 +54,15 @@ def main():
             status=request('/ota/status')
             state=(status.get('current_version'),status.get('update_status'),status.get('trial'))
             if state!=last:print('UPDATE',state,flush=True);last=state
+            if 'rolled back' in (status.get('update_error') or ''):
+                raise RuntimeError(status['update_error'])
             if status.get('update_status') in ('error','paused'):
                 raise RuntimeError(status.get('update_error'))
             if status['current_version']==args.version and not status.get('trial'):
                 break
         except (OSError,urllib.error.URLError):
             pass  # Expected while rebooting; bounded by overall deadline.
-        time.sleep(.5)
+        time.sleep(args.poll_interval)
     else:raise RuntimeError('Update did not confirm: '+str(last))
     after=request('/status')
     for field in ('best','longest_streak','hits','misses','throws','history','last_completed'):

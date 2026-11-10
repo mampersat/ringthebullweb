@@ -157,7 +157,7 @@ Do not blindly overwrite root main.py with the application once OTA is installed
 
 
 OTA commissioned 2026-11-09 on ring e66428c51fa06e28 (MicroPython 1.29.0).
-Current confirmed version 2026.11.09.4; root launcher/recovery/client installed,
+Initial confirmed version was 2026.11.09.4; root launcher/recovery/client installed,
 slots initialized. Authenticated Wi-Fi install/activation/trial confirmation and
 real watchdog-stall rollback were verified; known good manifest restored. Bench
 mode is explicit because sensors are disconnected; auto-exits on valid sensing.
@@ -168,3 +168,33 @@ log and credentials preserved. Publisher runs on host 192.168.1.145:8765, starte
 with tools/ota_release.py serve; not a persistent system service. Physical throws
 and real power-cut validation remain unverified. Host suite: 45 tests plus browser
 checks. Use tools/ota_maintenance.py for USB repair; never blindly upload root main.
+
+
+Approved fanfare is now integrated in web_server.PAGE: the preview's exact 15-hit
+note data and brass/timpani engine, matched by browser tests. Successful-hit count
+selects the phrase; misses are silent, including a miss resolving shot 21. Hits
+above 15 remain silent until the next game. Sound is browser-only, off on load,
+with test controls; no voice services, recorded assets or Pico audio hardware.
+score_boot/score_event/score_sound notify only resolved throws; undo/reset/rollover
+never emit. Per-boot dedupe prevents stale/load/reconnect/hidden/action replay.
+Diagnostics use six fixed grid fields so Grabbed/Hook do not move with numbers.
+
+New ota_idle() separates confirmed game activity from individual raw spikes while
+staging. ota_safe() stays strict for commands/activation and pending grab candidates.
+Verified releases wait ready until safe; confirmed play still pauses. Keep all
+sensor/debounce/reset/LED code unchanged. Legacy 4 needs a small signed bridge
+(tools/ota_guard_bridge.py), then normal full OTA. Bridge trial expansion preserves
+the previous slot, verifies source/output hashes, and copies into an independent
+slot before confirmation; never make one confirmed slot depend on the other.
+
+
+Fanfare shipped via Wi-Fi on 2026-11-09: current confirmed application version
+2026.11.09.6, after confirmed 2026.11.09.6-bridge. No USB access was used. The
+compatibility loader expanded verified previous-slot code into an independent
+trial slot before confirmation; the normal full release then replaced the other
+slot. Both transfers preserved 15/7 records and the last completed 15/21 card.
+Legacy raw-spike pauses were real; keep staging/activation gates separate. Live
+bench_mode is false (sensors connected); physical scoring was not artificially
+triggered for deployment verification. User must reload scoreboard and Enable Sound.
+Host tests: 50 plus scoreboard/approved-preview browser suites. Private keys,
+releases and device backups remain ignored.

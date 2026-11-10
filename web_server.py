@@ -21,7 +21,7 @@ header{text-align:center;border:3px double var(--brass);padding:8px 6px;margin-b
 #recordsError,#message{font:13px/1.4 'Courier New',monospace;color:#f3b49d;margin:10px 0}#recordsError:empty,#message:empty{display:none}footer{border-top:3px double #8e733f;text-align:center;margin-top:16px;padding-top:12px}footer p{font-size:.85rem;color:#c7b28a;margin:0 0 10px}canvas{display:block;margin:auto;max-width:100%;height:auto;image-rendering:pixelated}#pageUrl{display:block;color:var(--brass);font:12px 'Courier New',monospace;overflow-wrap:anywhere;margin-top:8px}
 @media(min-width:650px){body{padding:28px}main{padding:22px}header{padding:18px}.playfield{padding:20px}.counts{grid-template-columns:1.2fr 1fr}#hits{font-size:10rem}.shot-count strong{font-size:4rem}#action{font-size:1.6rem}.shot{height:38px;font-size:16px}.statusline,.results{font-size:16px}.records h2{font-size:1.5rem}table{font-size:16px}.lower{display:grid;grid-template-columns:1fr 190px;gap:28px;align-items:start}.controls{margin-top:16px}footer{margin-top:16px;padding-top:12px}footer canvas{max-width:150px}button{font-size:16px}}
 @media(max-width:350px){body{padding:7px}main{padding:7px}header{padding:8px 6px}#hits{font-size:4.5rem}#history{gap:4px}.shot{height:24px}#action{margin-top:8px;padding:6px 0}#state{margin-bottom:6px}.playfield{padding:10px}.records{margin-top:9px}.records h2{font-size:1.1rem}th,td{padding:4px 0}#weekly{font-size:11px}.controls{margin-top:9px}.results{font-size:12px}#action{font-size:1.05rem}}
-#debugPanel{margin-top:14px;border-top:1px solid var(--brass);padding-top:10px}#debugToggle{margin-top:12px;width:100%}#debugValues{font:13px/1.6 'Courier New',monospace}#sensorGraph{width:100%;height:180px;background:var(--screen);image-rendering:auto}#debugPanel[hidden]{display:none}#debugNote{font:12px/1.4 'Courier New',monospace;color:#c7b28a}
+#debugPanel{margin-top:14px;border-top:1px solid var(--brass);padding-top:10px}#debugToggle{margin-top:12px;width:100%}#debugValues{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;font:13px/1.6 'Courier New',monospace}#debugValues .metric{min-width:0;white-space:nowrap}#debugValues .metric span{display:block;font-size:11px;color:#c7b28a}#debugValues b{font-weight:normal;font-variant-numeric:tabular-nums}#debugStatus{min-height:1.4em;font:12px monospace}#sensorGraph{width:100%;height:180px;background:var(--screen);image-rendering:auto}#debugPanel[hidden]{display:none}#debugNote{font:12px/1.4 'Courier New',monospace;color:#c7b28a}
 </style><main><header><h1>Ring the Bull</h1></header>
 <div class="playfield"><div class="statusline"><span>21-shot game</span><span id="connection" role="status">Connecting...</span></div>
 <section id="scores" aria-label="Current game"><div class="counts"><div class="live-score"><span class="score-label">Score</span><strong id="hits">0</strong></div>
@@ -37,9 +37,14 @@ header{text-align:center;border:3px double var(--brass);padding:8px 6px;margin-b
 <div class="controls"><button id="undo" disabled>Undo</button><button id="reset">Start Over</button><button id="share" disabled>Share</button></div>
 <p id="recordsError" role="status"></p><p id="message" role="status"></p></div>
 <footer><p>Scan to join the game</p><canvas id="qr" role="img" aria-label="QR code for this scoreboard"></canvas><a id="pageUrl"></a></footer></div>
+<details id="sounds"><summary>Soundboard</summary>
+<button id="soundToggle" aria-pressed="false">Enable Sound</button>
+<p>C \xe2\x86\x92 G \xe2\x86\x92 high C; the approved 15-hit fanfare with low timpani. Misses do not advance it.</p>
+<div class="controls"><button id="testHit">Test Next Hit</button><button id="testRestart">Restart Test</button><button id="testComplete">Test Finale</button></div>
+<p id="soundInfo" role="status">Sound plays on this browser. Tap Enable Sound; keep the page open. No speaker is connected to the Pico.</p></details>
 <button id="debugToggle" aria-expanded="false" aria-controls="debugPanel">Enter Debug</button>
 <section id="debugPanel" hidden aria-label="Sensor diagnostics"><h2>Sensor diagnostics</h2>
-<div id="debugValues">Waiting for sensor readings...</div>
+<div id="debugValues"><div class="metric"><span>Raw</span><b id="debugRaw">unavailable</b></div><div class="metric"><span>Baseline (idle)</span><b id="debugBaseline">unavailable</b></div><div class="metric"><span>Delta</span><b id="debugDelta">unavailable</b></div><div class="metric"><span>Grab threshold</span><b id="debugThreshold">unavailable</b></div><div class="metric"><span>Grabbed</span><b id="debugGrabbed">no</b></div><div class="metric"><span>Hook contact</span><b id="debugHook" aria-label="Electrical hook contact">no</b></div></div><p id="debugStatus" role="status">Waiting for sensor readings...</p>
 <canvas id="sensorGraph" width="640" height="180" role="img" aria-label="Last 60 seconds: raw capacitance, idle baseline and grab threshold"></canvas>
 <p id="debugNote">Raw: cream / idle baseline: green / grab threshold: gold. Readings in microseconds, not farads. Baseline is an observed idle estimate, not scoring calibration. Gaps mean timeout or sensing skipped on hook.</p></section>
 <details id="updates"><summary>Application updates</summary>
@@ -59,6 +64,7 @@ async function update(){
  try{
   const response=await fetch('/status',{cache:'no-store',signal:controller.signal});
   if(!response.ok)throw Error('status');const s=await response.json();
+  try{observeScoreSound(s);}catch(e){document.getElementById('soundInfo').textContent='Audio unavailable: '+e.message;}
   latest=s;
   for(const key of ['hits','misses','throws','state','best','longest_streak'])document.getElementById(key).textContent=s[key];
   document.getElementById('rate').textContent=(s.throws?100*s.hits/s.throws:0).toFixed(1)+'%';
@@ -75,7 +81,7 @@ async function update(){
   document.getElementById('share').disabled=!(s.last_completed||s.complete);
   document.getElementById('share').textContent=s.last_completed&&!s.complete?'Share last game':'Share';
   document.getElementById('recordsError').textContent=s.records_error||'';
- }catch(e){document.getElementById('connection').textContent='Offline - reconnecting...';}
+ }catch(e){soundLastEvent=null;document.getElementById('connection').textContent='Offline - reconnecting...';}
  finally{clearTimeout(timeout);}
 }
 async function refresh(){await update();setTimeout(refresh,500);}
@@ -90,7 +96,7 @@ async function action(name){
   if(!response.ok)throw Error('Action unavailable');
   document.getElementById('message').textContent='';
  }catch(e){document.getElementById('message').textContent='Could not confirm action. Check the current score.';}
- finally{clearTimeout(timeout);actionBusy=false;document.getElementById('reset').disabled=false;await update();}
+ finally{clearTimeout(timeout);soundLastEvent=null;actionBusy=false;document.getElementById('reset').disabled=false;await update();}
 }
 document.getElementById('undo').onclick=()=>action('undo');
 document.getElementById('reset').onclick=()=>action('reset');
@@ -111,6 +117,111 @@ document.getElementById('share').onclick=async()=>{
  if(copied)document.getElementById('message').textContent='Results copied';
  else prompt('Copy results:',text);
 };
+// Approved fanfare: generated entirely in the browser, never on the Pico.
+let audioContext=null,soundEnabled=false,soundLastEvent=null,soundBoot=null;
+let musicVoices=[],lastFanfareNote=null,testStep=0;
+const fanfare=[{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E \xe2\x86\x92 E\xe2\x99\xad',hz:659.255114,target:622.253967,chord:true,duration:2.3},{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E\xe2\x99\xad \xe2\x86\x92 E',hz:622.253967,target:659.255114,chord:true,duration:2.3},{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E \xe2\x86\x92 F',hz:659.255114,target:698.456463,chord:true,fMajor:true,duration:2.3},{label:'F major + drums',chord:true,voicing:[174.614116,261.625565,440,698.456463],duration:2.3},{label:'G major',chord:true,voicing:[195.997718,293.664768,493.883301,783.990872],drums:false,duration:2.3},{label:'C major \xe2\x80\x94 triumph!',chord:true,voicing:[130.812783,261.625565,391.995436,659.255114,1046.502261],finale:true,duration:4.6}];
+function silenceSound(){
+ if(!audioContext)return;
+ for(const {osc,gain} of musicVoices){try{
+  gain.gain.cancelScheduledValues(audioContext.currentTime);
+  gain.gain.setTargetAtTime(.0001,audioContext.currentTime,.015);
+  osc.stop(audioContext.currentTime+.08);
+ }catch(e){}}musicVoices=[];
+}
+async function enableSound(){
+ try{
+  const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('Audio unavailable');
+  if(!audioContext)audioContext=new Audio();await audioContext.resume();
+  if(audioContext.state!=='running')throw Error('Tap again to allow audio');
+  soundEnabled=true;soundLastEvent=latest?.score_event??null;soundBoot=latest?.score_boot??null;
+  document.getElementById('soundToggle').textContent='Mute Sound';
+  document.getElementById('soundToggle').setAttribute('aria-pressed','true');
+  document.getElementById('soundInfo').textContent='Sound enabled on this browser. Keep the page open; phone sleep can stop audio.';
+  return true;
+ }catch(e){document.getElementById('soundInfo').textContent=e.message;return false;}
+}
+function brass(note){
+ silenceSound();const start=audioContext.currentTime;lastFanfareNote=note;
+ const pitches=note.voicing||(note.chord?[261.625565,391.995436,523.251131,note.hz]:[note.hz]);
+ for(const [voiceIndex,pitch] of pitches.entries()){
+ const target=note.chord?(voiceIndex===3?note.target:(note.fMajor&&voiceIndex===1?440:pitch)):note.target;
+ const volume=note.finale ? .35 : note.chord ? .45 : 1;
+ for(const [type,detune,level] of [['sawtooth',-5,.035],['sawtooth',5,.035],['triangle',0,.075]]){
+  const osc=audioContext.createOscillator(),gain=audioContext.createGain(),filter=audioContext.createBiquadFilter();
+  osc.type=type;osc.frequency.setValueAtTime(pitch,start);osc.detune.value=detune;
+  if(target&&target!==pitch){
+   osc.frequency.setValueAtTime(pitch,start+.85);
+   osc.frequency.linearRampToValueAtTime(target,start+.9);
+  }
+  filter.type='lowpass';filter.Q.value=.7;filter.frequency.setValueAtTime(700,start);
+  filter.frequency.exponentialRampToValueAtTime(3200,start+.13);filter.frequency.exponentialRampToValueAtTime(1100,start+note.duration);
+  gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(level*volume,start+.075);
+  gain.gain.setValueAtTime(level*.85*volume,start+note.duration*.65);gain.gain.exponentialRampToValueAtTime(.0001,start+note.duration);
+  osc.connect(filter);filter.connect(gain);gain.connect(audioContext.destination);
+  osc.onended=()=>{osc.disconnect();filter.disconnect();gain.disconnect();};
+  osc.start(start);osc.stop(start+note.duration+.05);musicVoices.push({osc,gain,kind:'brass',at:start});
+ }
+ }
+ if(note.chord&&note.drums!==false)drumFill(start+([fanfare[3],fanfare[7],fanfare[11]].includes(note)||note.finale ? .15 : note.duration+.1),note.finale);
+}
+// Eight low tuned timpani beats at the established tempo.
+function lowDrum(pitch,at,strength=.23,decay=.44){
+ const osc=audioContext.createOscillator(),gain=audioContext.createGain(),filter=audioContext.createBiquadFilter();
+ osc.type='triangle';osc.frequency.value=pitch;
+ osc.frequency.setValueAtTime(pitch*1.025,at);
+ osc.frequency.exponentialRampToValueAtTime(pitch,at+.035);
+ filter.type='lowpass';filter.frequency.value=600;filter.Q.value=.5;
+ gain.gain.setValueAtTime(.0001,at);
+ gain.gain.exponentialRampToValueAtTime(strength,at+.006);
+ gain.gain.exponentialRampToValueAtTime(.0001,at+decay);
+ osc.connect(filter);filter.connect(gain);gain.connect(audioContext.destination);
+ osc.onended=()=>{osc.disconnect();filter.disconnect();gain.disconnect();};
+ osc.start(at);osc.stop(at+decay+.02);musicVoices.push({osc,gain,kind:'timpani',pitch,at});
+}
+function drumFill(start,finale=false){
+ if(!finale){
+  for(let beat=0;beat<8;beat++)lowDrum(beat%2?48.999429:65.406391,start+beat*.5);
+  return;
+ }
+ // Broader C chord, rising low-timpani flourish, then a firm octave-C landing.
+ for(let beat=0;beat<8;beat++)lowDrum(beat%2?48.999429:65.406391,start+beat*.375,.16+beat*.012);
+ for(let tap=0;tap<6;tap++)lowDrum(65.406391,start+3+tap*.09,.10+tap*.025,.16);
+ lowDrum(65.406391,start+3.6,.29,.8);
+ lowDrum(130.812783,start+3.6,.08,.8);
+}
+
+function playScoreSound(kind,hitNumber){
+ if(!soundEnabled||document.hidden||!audioContext||audioContext.state!=='running')return;
+ if(kind!=='hit'||!Number.isInteger(hitNumber)||hitNumber<1||hitNumber>fanfare.length)return;
+ brass(fanfare[hitNumber-1]);
+ document.getElementById('soundInfo').textContent='Fanfare hit '+hitNumber+': '+fanfare[hitNumber-1].label;
+}
+function observeScoreSound(s){
+ const event=s.score_event,boot=s.score_boot??null;
+ if(!Number.isInteger(event)){soundLastEvent=null;return;}
+ if(soundLastEvent===null||boot!==soundBoot){soundBoot=boot;soundLastEvent=event;return;}
+ if(event>soundLastEvent&&!actionBusy){
+  const kind=s.score_sound==='complete'?(s.history?.[s.history.length-1]?'hit':'miss'):s.score_sound;
+  playScoreSound(kind,s.hits);
+ }
+ soundLastEvent=Math.max(soundLastEvent,event);
+}
+document.getElementById('soundToggle').onclick=async()=>{
+ if(!soundEnabled){await enableSound();return;}
+ soundEnabled=false;silenceSound();document.getElementById('soundToggle').textContent='Enable Sound';
+ document.getElementById('soundToggle').setAttribute('aria-pressed','false');
+ document.getElementById('soundInfo').textContent='Sound muted on this browser.';
+};
+document.getElementById('testHit').onclick=async()=>{
+ if(soundEnabled||await enableSound()){
+  if(testStep>=fanfare.length)testStep=0;
+  playScoreSound('hit',++testStep);
+ }
+};
+document.getElementById('testRestart').onclick=()=>{silenceSound();testStep=0;document.getElementById('soundInfo').textContent='Test reset to the first C.';};
+document.getElementById('testComplete').onclick=async()=>{if(soundEnabled||await enableSound())playScoreSound('hit',15);};
+document.addEventListener('visibilitychange',()=>{soundLastEvent=null;if(document.hidden)silenceSound();});
 // The update key stays only in memory; never in URLs or browser storage.
 let updateKey=null;
 async function updateInfo(){
@@ -171,12 +282,14 @@ async function pollDebug(){
   if(!response.ok)throw Error('debug');const s=await response.json();
   if(generation!==debugGeneration||!debugOpen||document.hidden)return;
   const value=n=>Number.isFinite(n)?Math.round(n*10)/10+' us':'unavailable';
-  document.getElementById('debugValues').textContent='Raw: '+value(s.raw)+' | Baseline (idle): '+value(s.baseline)+
-   ' | Delta: '+value(s.delta)+' | Grab threshold: '+value(s.grab_threshold)+
-   ' | Grabbed: '+(s.grabbed?'yes':'no')+' | Hook contact (electrical): '+(s.hook_contact?'yes':'no');
+  for(const [id,key] of [['debugRaw','raw'],['debugBaseline','baseline'],['debugDelta','delta'],['debugThreshold','grab_threshold']])
+   document.getElementById(id).textContent=value(s[key]);
+  document.getElementById('debugGrabbed').textContent=s.grabbed?'yes':'no';
+  document.getElementById('debugHook').textContent=s.hook_contact?'yes':'no';
+  document.getElementById('debugStatus').textContent='Live sensor readings';
   debugSamples.push({...s,t:performance.now()});if(debugSamples.length>300)debugSamples.shift();drawSensorGraph();
  }catch(e){if(generation===debugGeneration&&debugOpen&&!document.hidden)
-  document.getElementById('debugValues').textContent='Sensor diagnostics unavailable - retrying';}
+  document.getElementById('debugStatus').textContent='Sensor diagnostics unavailable - retrying';}
  finally{
   clearTimeout(timeout);debugRequest=null;
   if(debugOpen&&!document.hidden)debugTimer=setTimeout(pollDebug,Math.max(0,200-(performance.now()-started)));

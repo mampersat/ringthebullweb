@@ -1,0 +1,73 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ring the Bull — 2001 sketch</title>
+<style>body{max-width:620px;margin:30px auto;padding:18px;background:#1a120e;color:#f3e7c6;font:18px Georgia,serif}h1{color:#b7934b}button{background:#b7934b;color:#17130d;border:1px solid #e2c886;font:bold 20px Georgia,serif;padding:18px;min-height:56px}button:disabled{opacity:.6}#hit{width:100%;margin:18px 0}#notes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}#notes span{text-align:center;padding:14px 4px;border:1px solid #715b35;font:bold clamp(14px,4vw,24px) monospace}.played{background:#35503a}small{display:block;font:12px monospace;margin-top:8px}#status{min-height:3em}#restart{font-size:16px}footer{font-size:14px;color:#c7b28a;margin-top:24px}</style>
+<h1>2001 — melody sketch</h1><p>Phrase 1: C → G → high C → E / E♭.<br>Phrase 2: C → G → high C → E♭ / E.<br>Phrase 3: C → G → high C → E / F. Chords and eight low C / G drum beats on hits 4, 8 and 12.<br>Finale: F major + drums → G major → triumphant C major.</p>
+<div id="notes"><span>C<small>HIT 1</small></span><span>G<small>HIT 2</small></span><span>C↑<small>HIT 3</small></span><span>E → E♭<small>HIT 4</small></span><span>C<small>HIT 5</small></span><span>G<small>HIT 6</small></span><span>C↑<small>HIT 7</small></span><span>E♭ → E<small>HIT 8</small></span><span>C<small>HIT 9</small></span><span>G<small>HIT 10</small></span><span>C↑<small>HIT 11</small></span><span>E → F<small>HIT 12</small></span><span>F<small>HIT 13</small></span><span>G<small>HIT 14</small></span><span>C!<small>HIT 15</small></span></div>
+<button id="hit">Hit 1 — C</button><p id="status" role="status">Tap to start the brass/synth sketch.</p><button id="restart">Restart sequence</button>
+<footer>Synthesized pitch/timbre prototype, not a Phish recording. Local preview only; no connection to the Pico.</footer>
+<script>
+const notes=[{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E → E♭',hz:659.255114,target:622.253967,chord:true,duration:2.3},{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E♭ → E',hz:622.253967,target:659.255114,chord:true,duration:2.3},{label:'C',hz:261.625565,duration:1.5},{label:'G',hz:391.995436,duration:1.5},{label:'high C',hz:523.251131,duration:2.3},{label:'E → F',hz:659.255114,target:698.456463,chord:true,fMajor:true,duration:2.3},{label:'F major + drums',chord:true,voicing:[174.614116,261.625565,440,698.456463],duration:2.3},{label:'G major',chord:true,voicing:[195.997718,293.664768,493.883301,783.990872],drums:false,duration:2.3},{label:'C major — triumph!',chord:true,voicing:[130.812783,261.625565,391.995436,659.255114,1046.502261],finale:true,duration:4.6}];
+let step=0,context=null,voices=[],lastNote=null,busy=false;
+function hush(){if(!context)return;for(const {osc,gain} of voices){try{gain.gain.cancelScheduledValues(context.currentTime);gain.gain.setTargetAtTime(.0001,context.currentTime,.015);osc.stop(context.currentTime+.08);}catch(e){}}voices=[];}
+function brass(note){
+ hush();const start=context.currentTime;lastNote=note;
+ const pitches=note.voicing||(note.chord?[261.625565,391.995436,523.251131,note.hz]:[note.hz]);
+ for(const [voiceIndex,pitch] of pitches.entries()){
+ const target=note.chord?(voiceIndex===3?note.target:(note.fMajor&&voiceIndex===1?440:pitch)):note.target;
+ const volume=note.finale ? .35 : note.chord ? .45 : 1;
+ for(const [type,detune,level] of [['sawtooth',-5,.035],['sawtooth',5,.035],['triangle',0,.075]]){
+  const osc=context.createOscillator(),gain=context.createGain(),filter=context.createBiquadFilter();
+  osc.type=type;osc.frequency.setValueAtTime(pitch,start);osc.detune.value=detune;
+  if(target&&target!==pitch){
+   osc.frequency.setValueAtTime(pitch,start+.85);
+   osc.frequency.linearRampToValueAtTime(target,start+.9);
+  }
+  filter.type='lowpass';filter.Q.value=.7;filter.frequency.setValueAtTime(700,start);
+  filter.frequency.exponentialRampToValueAtTime(3200,start+.13);filter.frequency.exponentialRampToValueAtTime(1100,start+note.duration);
+  gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(level*volume,start+.075);
+  gain.gain.setValueAtTime(level*.85*volume,start+note.duration*.65);gain.gain.exponentialRampToValueAtTime(.0001,start+note.duration);
+  osc.connect(filter);filter.connect(gain);gain.connect(context.destination);
+  osc.onended=()=>{osc.disconnect();filter.disconnect();gain.disconnect();};
+  osc.start(start);osc.stop(start+note.duration+.05);voices.push({osc,gain,kind:'brass',at:start});
+ }
+ }
+ if(note.chord&&note.drums!==false)drumFill(start+([notes[3],notes[7],notes[11]].includes(note)||note.finale ? .15 : note.duration+.1),note.finale);
+}
+// Eight low tuned timpani beats at the established tempo.
+function lowDrum(pitch,at,strength=.23,decay=.44){
+ const osc=context.createOscillator(),gain=context.createGain(),filter=context.createBiquadFilter();
+ osc.type='triangle';osc.frequency.value=pitch;
+ osc.frequency.setValueAtTime(pitch*1.025,at);
+ osc.frequency.exponentialRampToValueAtTime(pitch,at+.035);
+ filter.type='lowpass';filter.frequency.value=600;filter.Q.value=.5;
+ gain.gain.setValueAtTime(.0001,at);
+ gain.gain.exponentialRampToValueAtTime(strength,at+.006);
+ gain.gain.exponentialRampToValueAtTime(.0001,at+decay);
+ osc.connect(filter);filter.connect(gain);gain.connect(context.destination);
+ osc.onended=()=>{osc.disconnect();filter.disconnect();gain.disconnect();};
+ osc.start(at);osc.stop(at+decay+.02);voices.push({osc,gain,kind:'timpani',pitch,at});
+}
+function drumFill(start,finale=false){
+ if(!finale){
+  for(let beat=0;beat<8;beat++)lowDrum(beat%2?48.999429:65.406391,start+beat*.5);
+  return;
+ }
+ // Broader C chord, rising low-timpani flourish, then a firm octave-C landing.
+ for(let beat=0;beat<8;beat++)lowDrum(beat%2?48.999429:65.406391,start+beat*.375,.16+beat*.012);
+ for(let tap=0;tap<6;tap++)lowDrum(65.406391,start+3+tap*.09,.10+tap*.025,.16);
+ lowDrum(65.406391,start+3.6,.29,.8);
+ lowDrum(130.812783,start+3.6,.08,.8);
+}
+document.getElementById('hit').onclick=async()=>{
+ if(busy||step>=notes.length)return;busy=true;
+ try{
+  if(!context){const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('Web Audio unavailable');context=new Audio();}
+  await context.resume();if(context.state!=='running')throw Error('Tap again to allow audio');
+  const note=notes[step];brass(note);document.querySelectorAll('#notes span')[step].classList.add('played');step++;
+  document.getElementById('status').textContent='Hit '+step+': '+note.label+(step===notes.length?' — fanfare complete!':'');
+  document.getElementById('hit').textContent=step===notes.length?'Fifteen hits — restart below':'Hit '+(step+1)+' — '+notes[step].label;
+  document.getElementById('hit').disabled=step===notes.length;
+ }catch(e){document.getElementById('status').textContent=e.message;}finally{busy=false;}
+};
+document.getElementById('restart').onclick=()=>{hush();step=0;document.getElementById('hit').disabled=false;document.getElementById('hit').textContent='Hit 1 — C';document.getElementById('status').textContent='Back to the first C.';document.querySelectorAll('#notes span').forEach(n=>n.classList.remove('played'));};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)hush();});
+</script></html>

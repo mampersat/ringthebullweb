@@ -78,6 +78,47 @@ class GameTests(unittest.TestCase):
         self.assertEqual(ns['throws'],0)
         self.assertEqual(ns['ota_boot']['phase'],'stable')
 
+    def test_ota_staging_tolerates_noise_but_activation_waits_for_release(self):
+        ns=self.ns
+        ns.update(last_cap=842,last_contact=False,hooked=False,completed_held=False)
+        self.assertTrue(ns['ota_idle']())
+        self.assertFalse(ns['ota_safe']())
+        calls=[]
+        updater=types.SimpleNamespace(phase='ready',poll=lambda safe:calls.append(safe))
+        ns.update(updater=updater,ota_config={'bench_mode':False})
+        self.samples(842,False,1)
+        self.assertEqual(calls,[],'unconfirmed grab must delay activation')
+        self.samples(50,False,20)
+        self.assertIn(True,calls,'stable released ring allows activation')
+        calls.clear();ns['state']=ns['HELD']
+        self.samples(1500,False,1)
+        self.assertEqual(calls,[False],'confirmed play must pause even a verified release')
+        self.assertFalse(ns['ota_idle']())
+        ns.update(state=ns['READY'],last_cap=None)
+        self.assertFalse(ns['ota_idle']())
+
+    def test_sound_events_only_follow_new_resolved_scores(self):
+        ns=self.ns
+        self.samples(1500,False,12)
+        self.samples(50,False,25)
+        self.assertEqual(ns['score_event'],0)
+        self.samples(50,True,18)
+        self.assertEqual((ns['score_event'],ns['score_sound']),(1,'hit'))
+        self.assertEqual(ns['web_status']()['score_event'],1)
+        self.assertTrue(ns['web_action']('undo'))
+        self.assertEqual(ns['score_event'],1)
+        ns['web_action']('reset')
+        self.assertEqual(ns['score_event'],1)
+        ns.update(history=[True]*20,throws=21,hits=20,misses=0,state=ns['IN_FLIGHT'],throw_started=self.now)
+        self.samples(50,False,155)
+        self.assertEqual((ns['score_event'],ns['score_sound']),(2,'complete'))
+        self.samples(1500,False,12)
+        self.samples(50,False,25)
+        self.assertEqual(ns['history'],[])
+        self.assertEqual(ns['score_event'],2,'rollover must not emit a score')
+        self.samples(50,False,155)
+        self.assertEqual((ns['score_event'],ns['score_sound']),(3,'miss'))
+
     def test_update_flushes_log_and_resumes_it_without_changing_game(self):
         ns=self.ns
         class Log:

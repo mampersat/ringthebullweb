@@ -156,9 +156,32 @@ Connect the phone to the same network and open **http://ringthebull.local/**. Fi
 
 If your client or network does not support mDNS, use the DHCP IP instead. The serial console prints `Scoreboard: http://<DHCP-IP>/` when the listener starts; your router's DHCP leases also show the address. Scan the QR to bring another phone to the same local page. After changing the hostname, use a hard reset/power cycle so it applies on a fresh connection (`ampy --port /dev/ttyACM0 reset --hard`).
 
-The self-contained page is about **21 KB**. It polls `/status` **500 ms after each request finishes**. The QR is generated once in the browser from `location.origin`; sharing uses that same origin, so neither depends on a hardcoded device address.
+The self-contained page is about **29 KB**. It polls `/status` **500 ms after each request finishes**. The QR is generated once in the browser from `location.origin`; sharing uses that same origin, so neither depends on a hardcoded device address.
 
 Networking uses `select.poll(0)`, nonblocking sockets, two client slots, bounded 512-byte reads/writes, and a five-second client timeout. Connection loss closes clients; the listener restarts after reconnection. Network initialization failures leave scoring running offline. There is no Wi-Fi setup portal or cloud relay.
+
+### Browser fanfare
+
+Shipped over Wi-Fi as **2026.11.09.6**, with restart/trial confirmation and preserved
+records/results. Includes the fixed diagnostics layout and staging-noise fix. The
+initial compatibility transfer used the signed bridge described below; no USB was
+needed. Reload the Pico page after updating to load the new browser audio code.
+
+Open **Soundboard** and tap **Enable Sound**. Each successful hit advances the
+approved 15-hit synthesized brass/timpani sequence; misses stay silent and do not
+advance it. Hits 1–4 play C / G / high C / E-to-E-flat; 5–8 reverse the last change;
+9–12 end E-to-F. Hits 4, 8 and 12 have eight early low C/G drum beats. Hit 13 is
+F major with drums, 14 G major, and 15 the big C-major/timpani finale. Hits above
+15 stay silent until the next game; a miss on shot 21 never triggers a celebration.
+
+**Test Next Hit**, **Restart Test**, and **Test Finale** audition it without changing
+scores. The standalone design preview is `tools/soundboard_preview.html`. All audio
+is generated locally in the browser with no recordings, voice services or external
+assets. Sound is off on load; keep the browser open. Each enabled browser plays
+independently, and phone sleep can stop audio. First load, reconnect, undo/reset,
+and stale responses do not replay old results. Slow polling plays only the newest
+result. The Pico publishes a small per-boot event counter/type; it does no audio
+processing and needs no speaker for this version. Physical game behavior is unchanged.
 
 ### Live sensor diagnostics
 
@@ -252,9 +275,12 @@ then activated together by a LittleFS atomic
 pointer replacement. Restarted/interrupted transfers begin at byte zero; this
 version does not use HTTP Range/resume offsets. Bad or partial slots never boot.
 
-Checks, staging and activation require an empty or completed game and a confirmed
-released ring. A grab, hook contact, timeout/unavailable sample, or unfinished game
-pauses staging; Check/Install can be retried when safe. Activation briefly restarts
+Checks and installation require an empty or completed game and a released ring.
+Staging follows confirmed game state, tolerating isolated unconfirmed capacitance
+spikes. A confirmed grab, hook contact, timeout/unavailable sample, or unfinished
+game pauses it. A fully verified release waits for a released ring and cleared
+grab candidate before activation; it does not restart the download for a brief
+candidate. Check/Install can be retried when safe. Activation briefly restarts
 the Pico, so sensing is unavailable during that restart. Flash operations can add
 latency even though sockets never block. They run only between games.
 
@@ -313,6 +339,7 @@ Plain HTTP on the Pico's local address. Responses are uncached. Mutations take a
 
 | Field | Meaning |
 |---|---|
+| `score_boot`, `score_event`, `score_sound` | Per-boot resolved-score notification for browser audio; counter/type only, no audio data |
 | `throws`, `hits`, `misses` | Started throws and resolved results; during flight, results can total one less than throws |
 | `history` | Ordered booleans: `true` hit, `false` miss; at most 21 |
 | `state` | `READY`, `HELD`, `IN FLIGHT`, `LANDED`, `WAIT RESET`, `WAIT RELEASE`, or `COMPLETE` |
@@ -377,3 +404,19 @@ The working scorer is the starting point. These are product directions to explor
 | **$10 clip-on** | Explore an add-on scorer for an existing game. **$10 is a target**, not a verified build cost or sale price. |
 
 Other open work: adaptive calibration, multiplayer, and fuller physical validation. Weekly streaks are deferred until there is a reliable synchronized clock. The Pico currently has no such clock setup; current game/undo history is RAM-only, and the three-second miss timeout can expire while a ring is still swinging.
+
+### Legacy sensing-gate compatibility release
+
+`tools/ota_guard_bridge.py` builds a one-time, roughly 2.6 KB signed application
+release for installed version `2026.11.09.4`, whose staging gate cancels on single
+raw spikes. Use quiet desktop polling (`tools/ota_verify.py --poll-interval 5`) for
+that transfer. It is not an unauthenticated override and keeps the hook/game gates.
+During trial boot, the bridge checks embedded hashes of all previous-slot source
+files, expands an independent copy into its own slot, and changes only the OTA
+gate/poll code. Expanded outputs are also hash-checked. Any interrupted expansion
+rolls back to the untouched previous slot; confirmation still requires normal loop
+progress and a safe state. Once confirmed, a normal full release can overwrite the
+previous slot safely. The launcher, updater, credentials, logs and records stay
+outside this application-only migration. Its signed transport files are loaders;
+their expected expanded hashes are embedded in that loader, rather than matching
+the small transport sizes. Normal releases continue to use ordinary file hashes.

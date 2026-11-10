@@ -48,11 +48,23 @@ const pageHtml = execFileSync('python3', ['-c', 'import web_server; import sys; 
   }
   assert.equal(debugCalls,0);
   await page.click('#debugToggle');
-  await page.waitForFunction(()=>document.getElementById('debugValues').textContent.includes('750 us'));
+  await page.waitForFunction(()=>document.getElementById('debugRaw').textContent==='750 us');
   await new Promise(resolve=>setTimeout(resolve,1050));
   assert.ok(debugCalls>=5&&debugCalls<=8,`debug requests ${debugCalls}`);
   assert.equal(await page.$eval('#debugToggle',e=>e.textContent),'Exit Debug');
-  assert.match(await page.$eval('#debugValues',e=>e.textContent),/Grabbed: yes.*Hook contact.*no/);
+  assert.equal(await page.$eval('#debugGrabbed',e=>e.textContent),'yes');
+  assert.equal(await page.$eval('#debugHook',e=>e.textContent),'no');
+  const metricPosition=()=>page.evaluate(()=>['debugGrabbed','debugHook'].map(id=>{
+   const r=document.getElementById(id).getBoundingClientRect();return [r.x,r.y];
+  }));
+  const fixedPositions=await metricPosition();
+  debugData={...debugData,raw:20000,baseline:12345.6,delta:-12345.6};
+  await page.waitForFunction(()=>document.getElementById('debugRaw').textContent==='20000 us');
+  assert.deepEqual(await metricPosition(),fixedPositions,'changing digits must not move state fields');
+  debugData={...debugData,raw:1,baseline:1,delta:0};
+  await page.waitForFunction(()=>document.getElementById('debugRaw').textContent==='1 us');
+  assert.deepEqual(await metricPosition(),fixedPositions);
+
   // Seed a full window to check bounded history and inspect all three traces.
   await page.evaluate(()=>{
    const now=performance.now();debugSamples.length=0;
@@ -74,8 +86,9 @@ const pageHtml = execFileSync('python3', ['-c', 'import web_server; import sys; 
   assert.equal(debugCalls,paused,'hidden page must stop diagnostics');
   debugData={...debugData,raw:null,delta:null,grabbed:false,hook_contact:true};
   await page.evaluate(()=>{window.testHidden=false;document.dispatchEvent(new Event('visibilitychange'));});
-  await page.waitForFunction(()=>document.getElementById('debugValues').textContent.includes('Raw: unavailable'));
-  assert.match(await page.$eval('#debugValues',e=>e.textContent),/Grabbed: no.*Hook contact.*yes/);
+  await page.waitForFunction(()=>document.getElementById('debugRaw').textContent==='unavailable');
+  assert.equal(await page.$eval('#debugGrabbed',e=>e.textContent),'no');
+  assert.equal(await page.$eval('#debugHook',e=>e.textContent),'yes');
   await page.click('#debugToggle');
   const closed=debugCalls;await new Promise(resolve=>setTimeout(resolve,500));
   assert.equal(debugCalls,closed,'closed panel must stop diagnostics');
@@ -162,6 +175,65 @@ const pageHtml = execFileSync('python3', ['-c', 'import web_server; import sys; 
   assert.ok(otaCalls.every(c=>c.key==='test-update-key'));
   assert.equal(await page.evaluate(()=>localStorage.length),0);
   console.log('PASS OTA UI: installed/available versions, authenticated check/install, no key in storage');
+  await page.evaluate(()=>document.getElementById('sounds').open=true);
+  await page.click('#soundToggle');
+  await page.waitForFunction(()=>soundEnabled&&audioContext.state==='running');
+  const soundResult=await page.evaluate(()=>{
+   let count=0;const create=audioContext.createOscillator.bind(audioContext);
+   audioContext.createOscillator=()=>{count++;return create();};
+   latest={score_event:0,uptime:100};soundLastEvent=null;
+   const snapshot=(event,kind)=>({score_event:event,score_sound:kind,hits:kind==='complete'?15:1,history:[true],uptime:101});
+   observeScoreSound(snapshot(0,null));const initial=count;
+   observeScoreSound(snapshot(1,'hit'));const hit=count;
+   observeScoreSound(snapshot(1,'hit'));const duplicate=count;
+   observeScoreSound(snapshot(2,'miss'));const miss=count;
+   observeScoreSound(snapshot(2,'miss'));const undo=count;
+   observeScoreSound({score_event:1,score_sound:'hit',uptime:0});const reboot=count;
+   window.testHidden=true;document.dispatchEvent(new Event('visibilitychange'));
+   observeScoreSound(snapshot(5,'hit'));
+   window.testHidden=false;document.dispatchEvent(new Event('visibilitychange'));
+   observeScoreSound(snapshot(6,'hit'));const resumed=count;
+   observeScoreSound(snapshot(7,'complete'));const finish=count;
+   document.getElementById('soundToggle').click();
+   observeScoreSound(snapshot(8,'hit'));const muted=count;
+   return {initial,hit,duplicate,miss,undo,reboot,resumed,finish,muted};
+  });
+  assert.deepEqual(soundResult,{initial:0,hit:3,duplicate:3,miss:3,undo:3,reboot:3,resumed:3,finish:34,muted:34});
+  await page.click('#testHit');
+  await page.waitForFunction(()=>soundEnabled);
+  assert.equal(await page.$eval('#soundToggle',e=>e.textContent),'Mute Sound');
+  const bootEvents=await page.evaluate(()=>{
+   const original=playScoreSound;let plays=0;
+   playScoreSound=kind=>{plays++;original(kind);};
+   observeScoreSound({score_boot:'old-boot',score_event:500,score_sound:'hit'});
+   observeScoreSound({score_boot:'old-boot',score_event:501,score_sound:'hit'});
+   observeScoreSound({score_boot:'old-boot',score_event:500,score_sound:'hit'});
+   observeScoreSound({score_boot:'old-boot',score_event:501,score_sound:'hit'});
+   const afterStale=plays;
+   observeScoreSound({score_boot:'new-boot',score_event:550,score_sound:'hit'});
+   const afterBoot=plays;
+   observeScoreSound({score_boot:'new-boot',score_event:551,score_sound:'hit'});
+   playScoreSound=original;return {afterStale,afterBoot,afterNew:plays};
+  });
+  assert.deepEqual(bootEvents,{afterStale:1,afterBoot:1,afterNew:2});
+  const approvedHtml=require('node:fs').readFileSync('tools/soundboard_preview.html','utf8');
+  const approvedNotes=require('node:vm').runInNewContext(approvedHtml.match(/const notes=(.*);/)[1]);
+  assert.equal(await page.evaluate(()=>JSON.stringify(fanfare)),JSON.stringify(approvedNotes));
+  let approvedEngine=approvedHtml.slice(approvedHtml.indexOf('function brass(note)'),approvedHtml.indexOf("document.getElementById('hit').onclick"));
+  for(const [from,to] of [['context','audioContext'],['voices','musicVoices'],['lastNote','lastFanfareNote'],['notes','fanfare'],['hush','silenceSound']])
+   approvedEngine=approvedEngine.replace(new RegExp('\\b'+from+'\\b','g'),to);
+  const shippedHtml=pageHtml.toString();
+  const shippedEngine=shippedHtml.slice(shippedHtml.indexOf('function brass(note)'),shippedHtml.indexOf('function playScoreSound'));
+  assert.equal(shippedEngine.trim(),approvedEngine.trim(),'shipped synthesis must match the approved preview');
+
+  await page.evaluate(()=>{playScoreSound('hit',13);});
+  assert.equal(await page.evaluate(()=>musicVoices.filter(v=>v.kind==='timpani').length),8);
+  await page.evaluate(()=>{playScoreSound('hit',14);});
+  assert.equal(await page.evaluate(()=>musicVoices.filter(v=>v.kind==='timpani').length),0);
+  await page.evaluate(()=>{playScoreSound('hit',15);});
+  assert.equal(await page.evaluate(()=>musicVoices.filter(v=>v.kind==='timpani').length),16);
+  await page.click('#testRestart');assert.equal(await page.evaluate(()=>testStep),0);
+  console.log('PASS soundboard: approved hit fanfare, silent misses, deduplication, undo/reset/reboot/hidden suppression, mute and test button');
   console.log('PASS mobile UI: 7x3 grid, phone layouts, QR, sharing last game after rollover/reset');
  } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exit(1);});
